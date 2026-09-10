@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import time
+from datetime import datetime, time, timedelta
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -106,3 +106,17 @@ def earliest_alarm_for_weekday(alarms: list[GarminAlarm], weekday_index: int) ->
     """Among all enabled alarms active on the given weekday, the earliest one wins."""
     candidates = [a.time_of_day for a in alarms if weekday_index in a.weekdays]
     return min(candidates) if candidates else None
+
+
+def next_alarm_datetime(alarms: list[GarminAlarm], now: datetime) -> datetime | None:
+    """The next point in time (today or up to a week out) an enabled alarm fires."""
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    for day_offset in range(8):
+        check_day = midnight + timedelta(days=day_offset)
+        alarm_time = earliest_alarm_for_weekday(alarms, check_day.weekday())
+        if alarm_time is None:
+            continue
+        candidate = check_day.replace(hour=alarm_time.hour, minute=alarm_time.minute, second=0, microsecond=0)
+        if candidate > now:
+            return candidate
+    return None

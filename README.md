@@ -39,6 +39,9 @@ chová podobně jako tado° appka, ale běží to celé lokálně u tebe doma.
 - **Probouzení podle budíku z Garmin hodinek** — pokud zadáš přihlašovací
   údaje do Garmin Connect, ranní "Comfort" blok pro daný den se automaticky
   posune na čas tvého nejbližšího aktivního budíku.
+- **Probouzení podle čidla v jiné místnosti** (např. ThermoPro v ložnici) —
+  volitelné, viz sekce níže. Termostat zůstává v obýváku, ale cílová teplota
+  a "kdy už je dost teplo" se vyhodnocuje podle čidla v ložnici.
 
 ## Architektura
 
@@ -72,6 +75,9 @@ Garmin Connect (garminconnect knihovna, nepovinné)
    - **Thermostat entity** — vyber `climate.*` entitu, kterou ti *tado X*
      vytvořil přes Matter integraci.
    - **Weather entity** — nepovinné, entita `weather.*` pro predikci vytápění.
+   - **Wake sensor** — nepovinné, entita `sensor.*` s `device_class: temperature`
+     (např. tvůj ThermoPro v ložnici), viz sekce
+     [Probouzení podle čidla v jiné místnosti](#probouzení-podle-čidla-v-jiné-místnosti-thermopro).
    - **Garmin Connect email/password** — nepovinné, pro synchronizaci budíku.
 5. Po dokončení vznikne zařízení s několika entitami (viz níže) — najdeš je
    pod **Settings → Devices & services → Devices → <Zone name>**.
@@ -120,6 +126,8 @@ max_temp: 28
 | `number.<zone>_outdoor_baseline_temp` | number | venkovní teplota, od které se předstih začíná prodlužovat |
 | `number.<zone>_outdoor_sensitivity` | number | jak moc chlad venku prodlužuje předstih |
 | `number.<zone>_wake_ready_buffer_minutes` | number | kolik minut před budíkem/blokem má být už teplo |
+| `number.<zone>_wake_target_temperature` | number | cílová teplota **na wake sensoru** (např. 24 °C v ložnici) |
+| `number.<zone>_wake_boost_temperature` | number | jak vysoko se nastaví termostat v obýváku, aby jistě topil, dokud wake sensor nedosáhne cíle |
 | `switch.<zone>_eco_mode` | switch | zapíná/vypíná eco setback |
 | `switch.<zone>_away_mode` | switch | přepne na teplotu "pryč" |
 | `sensor.<zone>_current_decision` | sensor | proč se topí/netopí právě teď (`scheduled comfort`, `preheating for 06:30`, `away`, ...) |
@@ -144,6 +152,42 @@ chladněji má být venku, tím dřív se začne topit — všechny čtyři kons
 `outdoor_sensitivity`) jsou `number` entity, které si doladíš přímo v HA podle
 reálného chování tvé místnosti, bez zásahu do kódu.
 
+## Probouzení podle čidla v jiné místnosti (ThermoPro)
+
+Tvůj případ: termostat (a jeho vlastní čidlo) je v obýváku, ale ráno 30–60
+minut před budíkem chceš mít teplo v ložnici, podle ukazatele ThermoPro
+tam. Řeší to nastavení `wake_sensor_entity` (v config flow integrace) +
+dvě nová čísla, `wake_target_temperature` (cíl na ThermoPro, ve tvém
+případě 24 °C) a `wake_boost_temperature` (na kolik se mezitím natáhne
+sám termostat v obýváku, aby jistě topil i když je v obýváku už teplo —
+výchozí 26 °C).
+
+Jakmile máš nastavený *wake sensor*, chování se pro dané dny (kde běží
+Garmin budík) změní takto:
+
+1. **Před oknem předstihu** (spočítá se stejnou váhovou logikou jako
+   normální preheating, jen z rozdílu `wake_target_temperature` a aktuální
+   hodnoty na ThermoPro) — nic se neděje, platí normální rozvrh.
+2. **V okně předstihu, dokud ThermoPro ukazuje méně než cíl** — termostat
+   v obýváku se nastaví na `wake_boost_temperature`, aby topení jelo naplno,
+   i kdyby obývák sám o sobě už svoji cílovku splňoval.
+3. **Jakmile ThermoPro dosáhne cíle** (u tebe 24 °C) — termostat se sníží na
+   `wake_target_temperature`, aby se drželo, ale dál nepřetápělo, a to až do
+   budíku.
+4. **Jakmile budík zazvoní** — celá tahle logika přestává platit a řízení se
+   vrátí zpět k normálnímu rozvrhu (podle vlastního čidla termostatu v
+   obýváku), přesně jak jsi popsal.
+
+Pokud `wake_sensor_entity` nenastavíš, integrace se chová jako dřív: Garmin
+budík jen posune čas ranního "Comfort" bloku v rozvrhu a řídí se podle
+vlastního čidla termostatu.
+
+> **Poznámka k topné soustavě:** aby tohle dávalo smysl, musí zvýšení
+> setpointu na termostatu v obýváku reálně přitopit i v ložnici (typicky
+> centrální kotel řízený jedním hlavním termostatem). Pokud má ložnice
+> vlastní nezávislý radiátor/hlavici, potřebovala by vlastní `climate`
+> entitu a vlastní zónu integrace, ne jen čidlo.
+
 ## Co tohle *není*
 
 - **Není to náhrada tado° cloudu 1:1.** Eco/rozvrh/probouzení jsou naše
@@ -159,9 +203,9 @@ reálného chování tvé místnosti, bez zásahu do kódu.
 ## Co bylo a nebylo otestováno
 
 - Logika v `decision.py` (preheating, eco setback, away override, Garmin
-  přepis ranního bloku, hranice horizontu) má jednotkové testy v `tests/` —
-  spustíš je čistým `pytest tests/` bez nutnosti mít nainstalovaný Home
-  Assistant.
+  přepis ranního bloku, hranice horizontu, boost/hold/revert cyklus wake
+  sensoru) má jednotkové testy v `tests/` — spustíš je čistým
+  `pytest tests/` bez nutnosti mít nainstalovaný Home Assistant.
 - Převod mezi malovací mřížkou karty (48 slotů/den) a uloženými bloky
   (`blocksToSlots`/`slotsToBlocks`) byl ověřen ručním round-trip testem.
 - **Nebylo (a nemohlo být) otestováno proti reálné instalaci Home Assistant,

@@ -12,6 +12,7 @@ from .const import (
     CONF_GARMIN_EMAIL,
     CONF_GARMIN_PASSWORD,
     CONF_GARMIN_WEEKDAYS,
+    CONF_WAKE_SENSOR_ENTITY,
     CONF_WEATHER_ENTITY,
     CONF_ZONE_NAME,
     DOMAIN,
@@ -26,6 +27,9 @@ STEP_USER_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_WEATHER_ENTITY): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="weather")
+        ),
+        vol.Optional(CONF_WAKE_SENSOR_ENTITY): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
         ),
         vol.Optional(CONF_GARMIN_EMAIL): selector.TextSelector(),
         vol.Optional(CONF_GARMIN_PASSWORD): selector.TextSelector(
@@ -72,6 +76,9 @@ class TadoScheduleOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_WEATHER_ENTITY, default=current.get(CONF_WEATHER_ENTITY)): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="weather")
                 ),
+                vol.Optional(
+                    CONF_WAKE_SENSOR_ENTITY, default=current.get(CONF_WAKE_SENSOR_ENTITY)
+                ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
                 vol.Optional(CONF_GARMIN_EMAIL, default=current.get(CONF_GARMIN_EMAIL, "")): selector.TextSelector(),
                 vol.Optional(
                     CONF_GARMIN_PASSWORD, default=current.get(CONF_GARMIN_PASSWORD, "")

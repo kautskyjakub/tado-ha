@@ -7,6 +7,7 @@
           "zone_name": "Zone name",
           "climate_entity": "Thermostat entity (the Matter-exposed tado X climate entity)",
           "weather_entity": "Weather entity (optional, used for preheat forecasting)",
+          "wake_sensor_entity": "Wake sensor (optional, e.g. a bedroom ThermoPro temperature sensor - used only for the Garmin wake preheat)",
           "garmin_email": "Garmin Connect email (optional)",
           "garmin_password": "Garmin Connect password (optional)",
           "garmin_weekdays": "Days the Garmin alarm should set the wake time"
@@ -25,6 +26,7 @@
       "init": {
         "data": {
           "weather_entity": "Weather entity",
+          "wake_sensor_entity": "Wake sensor (e.g. a bedroom ThermoPro temperature sensor)",
           "garmin_email": "Garmin Connect email",
           "garmin_password": "Garmin Connect password",
           "garmin_weekdays": "Days the Garmin alarm should set the wake time"
@@ -40,7 +42,9 @@
       "max_preheat_minutes": { "name": "Max preheat lead time" },
       "outdoor_baseline_temp": { "name": "Outdoor baseline temperature" },
       "outdoor_sensitivity": { "name": "Outdoor sensitivity" },
-      "wake_ready_buffer_minutes": { "name": "Wake ready buffer" }
+      "wake_ready_buffer_minutes": { "name": "Wake ready buffer" },
+      "wake_target_temperature": { "name": "Wake sensor target temperature" },
+      "wake_boost_temperature": { "name": "Wake preheat boost temperature" }
     },
     "switch": {
       "eco_mode": { "name": "Eco mode" },

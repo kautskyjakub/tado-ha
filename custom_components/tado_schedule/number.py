@@ -102,6 +102,29 @@ NUMBERS: tuple[TadoNumberDescription, ...] = (
         icon="mdi:alarm",
         entity_category=EntityCategory.CONFIG,
     ),
+    TadoNumberDescription(
+        key="wake_target_temperature",
+        attr="wake_target_temp",
+        translation_key="wake_target_temperature",
+        native_min_value=10,
+        native_max_value=28,
+        native_step=0.5,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        mode=NumberMode.BOX,
+        icon="mdi:bed",
+    ),
+    TadoNumberDescription(
+        key="wake_boost_temperature",
+        attr="wake_boost_temp",
+        translation_key="wake_boost_temperature",
+        native_min_value=15,
+        native_max_value=35,
+        native_step=0.5,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        mode=NumberMode.BOX,
+        icon="mdi:fire",
+        entity_category=EntityCategory.CONFIG,
+    ),
 )
 
 

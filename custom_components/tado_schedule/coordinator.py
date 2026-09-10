@@ -15,7 +15,9 @@ from .const import (
     DEFAULT_MAX_PREHEAT_MINUTES,
     DEFAULT_OUTDOOR_BASELINE_C,
     DEFAULT_OUTDOOR_SENSITIVITY,
+    DEFAULT_WAKE_BOOST_TEMP,
     DEFAULT_WAKE_READY_BUFFER_MINUTES,
+    DEFAULT_WAKE_TARGET_TEMP,
     DEFAULT_WARMUP_MINUTES_PER_DEGREE,
     GARMIN_UPDATE_INTERVAL_SECONDS,
     UPDATE_INTERVAL_SECONDS,
@@ -40,6 +42,8 @@ class TunableSettings:
     outdoor_baseline_c: float = DEFAULT_OUTDOOR_BASELINE_C
     outdoor_sensitivity: float = DEFAULT_OUTDOOR_SENSITIVITY
     wake_ready_buffer_minutes: int = DEFAULT_WAKE_READY_BUFFER_MINUTES
+    wake_target_temp: float = DEFAULT_WAKE_TARGET_TEMP
+    wake_boost_temp: float = DEFAULT_WAKE_BOOST_TEMP
 
 
 class GarminAlarmCoordinator(DataUpdateCoordinator[list[GarminAlarm]]):
@@ -67,6 +71,7 @@ class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):
         *,
         climate_entity_id: str,
         weather_entity_id: str | None,
+        wake_sensor_entity_id: str | None,
         weekplan_store: WeekplanStore,
         settings: TunableSettings,
         garmin_coordinator: GarminAlarmCoordinator | None,
@@ -79,6 +84,7 @@ class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):
         )
         self.climate_entity_id = climate_entity_id
         self.weather_entity_id = weather_entity_id
+        self.wake_sensor_entity_id = wake_sensor_entity_id
         self.weekplan_store = weekplan_store
         self.settings = settings
         self.garmin_coordinator = garmin_coordinator
@@ -104,6 +110,9 @@ class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):
             outdoor_baseline_c=self.settings.outdoor_baseline_c,
             outdoor_sensitivity=self.settings.outdoor_sensitivity,
             wake_ready_buffer_minutes=self.settings.wake_ready_buffer_minutes,
+            wake_sensor_temp=self._wake_sensor_temp(),
+            wake_target_temp=self.settings.wake_target_temp if self.wake_sensor_entity_id else None,
+            wake_boost_temp=self.settings.wake_boost_temp,
         )
         await self._async_apply_decision(decision)
         return decision
@@ -114,6 +123,17 @@ class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):
             return None
         value = state.attributes.get("current_temperature")
         return float(value) if value is not None else None
+
+    def _wake_sensor_temp(self) -> float | None:
+        if not self.wake_sensor_entity_id:
+            return None
+        state = self.hass.states.get(self.wake_sensor_entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            return float(state.state)
+        except ValueError:
+            return None
 
     async def _async_outdoor_forecast_temp(self) -> float | None:
         if not self.weather_entity_id:

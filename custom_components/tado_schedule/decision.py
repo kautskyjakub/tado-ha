@@ -13,7 +13,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from .const import WEEKDAYS
-from .garmin import GarminAlarm, earliest_alarm_for_weekday
+from .garmin import GarminAlarm, earliest_alarm_for_weekday, next_alarm_datetime
 
 
 @dataclass
@@ -115,6 +115,61 @@ def estimate_preheat_minutes(
     return min(max_preheat_minutes, round(deficit * rate))
 
 
+def compute_wake_decision(
+    now: datetime,
+    alarm_dt: datetime | None,
+    wake_sensor_temp: float | None,
+    wake_target_temp: float,
+    wake_boost_temp: float,
+    outdoor_forecast_temp: float | None,
+    warmup_minutes_per_degree: float,
+    max_preheat_minutes: int,
+    outdoor_baseline_c: float,
+    outdoor_sensitivity: float,
+    wake_ready_buffer_minutes: int,
+) -> HeatingDecision | None:
+    """Preheat a *different* room than the thermostat's own, using a remote
+    sensor (e.g. a ThermoPro in the bedroom) as the source of truth.
+
+    The thermostat's own setpoint is pushed to `wake_boost_temp` - high
+    enough to keep the heat call running even though the thermostat's own
+    room is already comfortable - for as long as the remote sensor reads
+    below `wake_target_temp`. Once that target is reached the setpoint is
+    relaxed to `wake_target_temp` to hold rather than overheat, right up
+    until the alarm fires; after that this function stops applying (returns
+    None) and normal schedule-driven control takes back over.
+    """
+    if alarm_dt is None or now >= alarm_dt or wake_sensor_temp is None:
+        return None
+
+    if wake_sensor_temp < wake_target_temp:
+        # Deficit-based lead: the colder the bedroom (and the colder outside),
+        # the earlier boosting kicks in.
+        lead = estimate_preheat_minutes(
+            wake_target_temp,
+            wake_sensor_temp,
+            outdoor_forecast_temp,
+            warmup_minutes_per_degree,
+            outdoor_baseline_c,
+            outdoor_sensitivity,
+            max_preheat_minutes,
+        )
+        window_start = alarm_dt - timedelta(minutes=lead + wake_ready_buffer_minutes)
+        if now < window_start:
+            return None
+        return HeatingDecision(wake_boost_temp, "heat", f"preheating bedroom for wake at {alarm_dt:%H:%M}")
+
+    # Target already met. A deficit of 0 would make the lead calculation
+    # above collapse to 0 minutes, which would make the window appear to
+    # "not have started yet" right as the room becomes comfortable - so the
+    # hold phase instead uses the widest configured window (max_preheat_minutes)
+    # to decide whether we're still "in" this wake cycle at all.
+    window_start = alarm_dt - timedelta(minutes=max_preheat_minutes + wake_ready_buffer_minutes)
+    if now < window_start:
+        return None
+    return HeatingDecision(wake_target_temp, "heat", f"holding bedroom temp until wake at {alarm_dt:%H:%M}")
+
+
 def compute_decision(
     now: datetime,
     weekplan: dict[str, list[dict[str, Any]]],
@@ -131,11 +186,40 @@ def compute_decision(
     outdoor_baseline_c: float,
     outdoor_sensitivity: float,
     wake_ready_buffer_minutes: int,
+    wake_sensor_temp: float | None = None,
+    wake_target_temp: float | None = None,
+    wake_boost_temp: float | None = None,
 ) -> HeatingDecision:
     if away_active:
         return HeatingDecision(away_temp, "heat", "away")
 
-    upcoming = next_comfort_transition(weekplan, now, garmin_alarms, max_preheat_minutes + wake_ready_buffer_minutes)
+    # A dedicated wake sensor (e.g. a bedroom ThermoPro) takes over the whole
+    # "what should happen before the alarm" question; the visual weekplan's
+    # own comfort block is left completely untouched by Garmin in that case,
+    # and only the legacy "shift the first comfort block" behaviour below
+    # applies when no such sensor is configured.
+    if wake_target_temp is not None:
+        alarm_dt = next_alarm_datetime(garmin_alarms, now) if garmin_alarms else None
+        wake_decision = compute_wake_decision(
+            now,
+            alarm_dt,
+            wake_sensor_temp,
+            wake_target_temp,
+            wake_boost_temp if wake_boost_temp is not None else wake_target_temp,
+            outdoor_forecast_temp,
+            warmup_minutes_per_degree,
+            max_preheat_minutes,
+            outdoor_baseline_c,
+            outdoor_sensitivity,
+            wake_ready_buffer_minutes,
+        )
+        if wake_decision is not None:
+            return wake_decision
+        schedule_garmin_alarms: list[GarminAlarm] = []
+    else:
+        schedule_garmin_alarms = garmin_alarms
+
+    upcoming = next_comfort_transition(weekplan, now, schedule_garmin_alarms, max_preheat_minutes + wake_ready_buffer_minutes)
     if upcoming is not None:
         next_dt, next_block = upcoming
         target_temp = float(next_block["temp"])
@@ -152,7 +236,7 @@ def compute_decision(
         if preheat_start <= now < next_dt:
             return HeatingDecision(target_temp, "heat", f"preheating for {next_dt:%H:%M}")
 
-    block = block_for(weekplan, now, garmin_alarms)
+    block = block_for(weekplan, now, schedule_garmin_alarms)
     mode = block.get("mode", "comfort")
     temp = float(block["temp"])
     if eco_active:

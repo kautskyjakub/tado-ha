@@ -1,7 +1,7 @@
 """Read-only sensors: what's the coordinator doing right now, and why."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -11,7 +11,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import ATTR_WEEKPLAN, DOMAIN
-from .garmin import earliest_alarm_for_weekday
+from .garmin import next_alarm_datetime
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -86,19 +86,7 @@ class NextGarminWakeSensor(CoordinatorEntity, SensorEntity):
         if self._garmin_coordinator is None:
             return None
         alarms = self._garmin_coordinator.data or []
-        now = dt_util.now()
-        for day_offset in range(8):
-            check_day = now + timedelta(days=day_offset)
-            weekday_index = check_day.weekday()
-            alarm_time = earliest_alarm_for_weekday(alarms, weekday_index)
-            if alarm_time is None:
-                continue
-            candidate = check_day.replace(
-                hour=alarm_time.hour, minute=alarm_time.minute, second=0, microsecond=0
-            )
-            if candidate > now:
-                return candidate
-        return None
+        return next_alarm_datetime(alarms, dt_util.now())
 
 
 class WeekplanSensor(CoordinatorEntity, SensorEntity):

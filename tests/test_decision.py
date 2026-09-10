@@ -3,6 +3,7 @@ from datetime import datetime, time
 from custom_components.tado_schedule.decision import (
     block_for,
     compute_decision,
+    compute_wake_decision,
     estimate_preheat_minutes,
     next_comfort_transition,
 )
@@ -146,3 +147,108 @@ def test_next_comfort_transition_respects_horizon():
     now = datetime(2026, 9, 14, 23, 0)
     result = next_comfort_transition(weekplan, now, [], horizon_minutes=30)
     assert result is None
+
+
+# ---------- wake sensor (e.g. a bedroom ThermoPro) ----------
+
+WAKE_KWARGS = dict(
+    outdoor_forecast_temp=5.0,
+    warmup_minutes_per_degree=12.0,
+    max_preheat_minutes=90,
+    outdoor_baseline_c=10.0,
+    outdoor_sensitivity=0.03,
+    wake_ready_buffer_minutes=0,
+)
+
+
+def test_wake_sensor_boosts_thermostat_while_bedroom_is_cold():
+    alarm_dt = datetime(2026, 9, 14, 6, 30)
+    # lead = 12 * (1 + 5*0.03) * (24-18) = 82.8 -> 83 min -> preheat starts 05:07
+    now = datetime(2026, 9, 14, 5, 30)
+    decision = compute_wake_decision(now, alarm_dt, 18.0, 24.0, 26.0, **WAKE_KWARGS)
+    assert decision is not None
+    assert decision.target_temp == 26.0  # boost temp, to force a heat call from the living room thermostat
+    assert decision.hvac_mode == "heat"
+    assert "preheating bedroom" in decision.reason
+
+
+def test_wake_sensor_holds_target_once_bedroom_is_warm_enough():
+    alarm_dt = datetime(2026, 9, 14, 6, 30)
+    now = datetime(2026, 9, 14, 6, 15)  # still before the alarm
+    decision = compute_wake_decision(now, alarm_dt, 24.5, 24.0, 26.0, **WAKE_KWARGS)
+    assert decision is not None
+    assert decision.target_temp == 24.0  # holds the wake target, not the boost temp
+    assert "holding bedroom" in decision.reason
+
+
+def test_wake_sensor_stops_applying_once_the_alarm_fires():
+    alarm_dt = datetime(2026, 9, 14, 6, 30)
+    assert compute_wake_decision(alarm_dt, alarm_dt, 18.0, 24.0, 26.0, **WAKE_KWARGS) is None
+    later = datetime(2026, 9, 14, 6, 45)
+    assert compute_wake_decision(later, alarm_dt, 18.0, 24.0, 26.0, **WAKE_KWARGS) is None
+
+
+def test_wake_sensor_does_nothing_before_its_preheat_window_starts():
+    alarm_dt = datetime(2026, 9, 14, 6, 30)
+    now = datetime(2026, 9, 14, 2, 0)  # far earlier than the ~83 minute lead needs
+    assert compute_wake_decision(now, alarm_dt, 18.0, 24.0, 26.0, **WAKE_KWARGS) is None
+
+
+def test_compute_decision_prefers_wake_sensor_over_visual_schedule_before_alarm():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    alarms = [GarminAlarm(enabled=True, time_of_day=time(6, 30), weekdays={0, 1, 2, 3, 4})]
+    now = datetime(2026, 9, 14, 6, 0)  # inside the wake preheat window, before the alarm
+    decision = compute_decision(
+        now,
+        weekplan,
+        alarms,
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 21.0,  # living room is already fine...
+            "wake_sensor_temp": 17.0,  # ...but the bedroom is still cold
+            "wake_target_temp": 24.0,
+            "wake_boost_temp": 26.0,
+        },
+    )
+    assert decision.target_temp == 26.0
+    assert "bedroom" in decision.reason
+
+
+def test_compute_decision_reverts_to_normal_schedule_after_alarm_fires():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    alarms = [GarminAlarm(enabled=True, time_of_day=time(6, 30), weekdays={0, 1, 2, 3, 4})]
+    now = datetime(2026, 9, 14, 7, 0)  # after the alarm
+    decision = compute_decision(
+        now,
+        weekplan,
+        alarms,
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 21.0,
+            "wake_sensor_temp": 17.0,  # bedroom sensor no longer consulted post-alarm
+            "wake_target_temp": 24.0,
+            "wake_boost_temp": 26.0,
+        },
+    )
+    assert decision.target_temp == 21.0
+    assert decision.reason == "scheduled comfort"
+
+
+def test_away_mode_still_overrides_wake_sensor_preheat():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    alarms = [GarminAlarm(enabled=True, time_of_day=time(6, 30), weekdays={0, 1, 2, 3, 4})]
+    now = datetime(2026, 9, 14, 6, 0)
+    decision = compute_decision(
+        now,
+        weekplan,
+        alarms,
+        **{
+            **BASE_KWARGS,
+            "away_active": True,
+            "wake_sensor_temp": 17.0,
+            "wake_target_temp": 24.0,
+            "wake_boost_temp": 26.0,
+        },
+    )
+    assert decision.reason == "away"
+    assert decision.target_temp == BASE_KWARGS["away_temp"]
