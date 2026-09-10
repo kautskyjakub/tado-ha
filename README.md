@@ -42,6 +42,12 @@ chová podobně jako tado° appka, ale běží to celé lokálně u tebe doma.
 - **Probouzení podle čidla v jiné místnosti** (např. ThermoPro v ložnici) —
   volitelné, viz sekce níže. Termostat zůstává v obýváku, ale cílová teplota
   a "kdy už je dost teplo" se vyhodnocuje podle čidla v ložnici.
+- **Topná sezóna** — mimo nastavené měsíce (výchozí říjen–duben) se aktivně
+  netopí vůbec, jen běží mrazová pojistka. Chladná noc mimo sezónu tak nic
+  nespustí — rozhoduje kalendář, ne okamžitá teplota.
+- **"Mírný den"** — uvnitř sezóny, když venku (aktuálně/dle předpovědi)
+  přesáhne nastavenou hranici, se cílová teplota automaticky sníží (podobně
+  jako eco mode), protože byt se pravděpodobně dohřeje sám. Viz sekce níže.
 
 ## Architektura
 
@@ -128,6 +134,10 @@ max_temp: 28
 | `number.<zone>_wake_ready_buffer_minutes` | number | kolik minut před budíkem/blokem má být už teplo |
 | `number.<zone>_wake_target_temperature` | number | cílová teplota **na wake sensoru** (např. 24 °C v ložnici) |
 | `number.<zone>_wake_boost_temperature` | number | jak vysoko se nastaví termostat v obýváku, aby jistě topil, dokud wake sensor nedosáhne cíle |
+| `number.<zone>_season_start_month` / `..._season_end_month` | number | 1–12, měsíce topné sezóny (výchozí 10 a 4 = říjen–duben, přes přelom roku) |
+| `number.<zone>_frost_protect_temperature` | number | bezpečnostní minimum mimo sezónu (výchozí 7 °C) |
+| `number.<zone>_mild_outdoor_threshold` | number | venkovní teplota, nad kterou se počítá s "mírným dnem" (výchozí 16 °C) |
+| `number.<zone>_mild_setback` | number | o kolik °C se sníží cílovka v mírný den (výchozí 3 °C) |
 | `switch.<zone>_eco_mode` | switch | zapíná/vypíná eco setback |
 | `switch.<zone>_away_mode` | switch | přepne na teplotu "pryč" |
 | `sensor.<zone>_current_decision` | sensor | proč se topí/netopí právě teď (`scheduled comfort`, `preheating for 06:30`, `away`, ...) |
@@ -188,6 +198,35 @@ vlastního čidla termostatu.
 > vlastní nezávislý radiátor/hlavici, potřebovala by vlastní `climate`
 > entitu a vlastní zónu integrace, ne jen čidlo.
 
+## Topná sezóna a "mírný den" (úspora energie)
+
+Tohle jsou dvě záměrně **oddělené** vrstvy, protože řeší různě dlouhé
+časové horizonty a plést je dohromady vede přesně k chybě, které jsme se
+chtěli vyhnout (aby chladná srpnová noc omylem nespustila topení):
+
+1. **Topná sezóna** (`season_start_month`/`season_end_month`, výchozí
+   10 → 4) je tvrdá brána podle **kalendáře**. Mimo tyto měsíce se aktivně
+   netopí vůbec — jediná výjimka je mrazová pojistka
+   (`frost_protect_temperature`, výchozí 7 °C): pokud by vnitřní teplota
+   klesla pod tuhle hranici i mimo sezónu (aby nezamrzly rozvody), krátce
+   se zatopí na tuto bezpečnou hodnotu. Okamžitá venkovní teplota na tohle
+   nemá vliv — jen měsíc v kalendáři.
+2. **"Mírný den"** (`mild_outdoor_threshold`/`mild_setback`, výchozí 16 °C
+   / 3 °C) běží **uvnitř** sezóny a reaguje na aktuální/předpovězenou
+   venkovní teplotu za běhu: pokud je nebo bude teplo, cílová teplota se
+   sníží o `mild_setback`, protože sluneční/vnitřní zisky byt pravděpodobně
+   dohřejí samy. Je to schválně **odečet, ne úplné vypnutí** — predikce
+   počasí není dokonalá (závisí na orientaci oken, slunci ten den), takže
+   odečet šetří energii, ale nenechá tě prochladnout, když se předpověď
+   netrefí. Když je zrovna zapnutý i eco mode, použije se ten silnější z
+   obou odečtů, ne aby se sčítaly.
+
+Obě věci jsou `number` entity — klidně si je za chodu doladíš (např. pokud
+ti přijde 3 °C na mírný den málo/moc, nebo chceš sezónu užší/širší) bez
+zásahu do kódu. Reálné chování zatím nebylo ověřeno na tvém konkrétním bytě
+(tepelná setrvačnost, orientace oken) — první týdny to sleduj a hodnoty
+doladi podle toho, jak moc/málo to skutečně vytápí.
+
 ## Co tohle *není*
 
 - **Není to náhrada tado° cloudu 1:1.** Eco/rozvrh/probouzení jsou naše
@@ -204,7 +243,8 @@ vlastního čidla termostatu.
 
 - Logika v `decision.py` (preheating, eco setback, away override, Garmin
   přepis ranního bloku, hranice horizontu, boost/hold/revert cyklus wake
-  sensoru) má jednotkové testy v `tests/` — spustíš je čistým
+  sensoru, brána topné sezóny včetně přelomu roku, odečet za mírný den a
+  že se s eco nesčítá) má jednotkové testy v `tests/` — spustíš je čistým
   `pytest tests/` bez nutnosti mít nainstalovaný Home Assistant.
 - Převod mezi malovací mřížkou karty (48 slotů/den) a uloženými bloky
   (`blocksToSlots`/`slotsToBlocks`) byl ověřen ručním round-trip testem.
@@ -219,5 +259,3 @@ vlastního čidla termostatu.
 
 - Víc "Comfort" bloků za den s vlastním předstihem pro každý.
 - Přímé malování konkrétní teploty tahem (místo tří pevných režimů).
-- Automatické snížení eco setbacku, pokud má být venku dost teplo, že se
-  stejně nemusí topit vůbec.

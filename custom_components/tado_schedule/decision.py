@@ -49,6 +49,20 @@ def _effective_day_blocks(
     return sorted(result, key=lambda b: b["start"])
 
 
+def in_heating_season(now: datetime, start_month: int, end_month: int) -> bool:
+    """Whether `now` falls inside the [start_month, end_month] window (inclusive).
+
+    Wraps across the year boundary when start_month > end_month (e.g. 10..4
+    for "October through April"), which is the normal case for a heating
+    season - a plain range check would otherwise treat October as "after"
+    April and never match.
+    """
+    month = now.month
+    if start_month <= end_month:
+        return start_month <= month <= end_month
+    return month >= start_month or month <= end_month
+
+
 def block_for(
     weekplan: dict[str, list[dict[str, Any]]], now: datetime, garmin_alarms: list[GarminAlarm]
 ) -> dict[str, Any]:
@@ -189,9 +203,24 @@ def compute_decision(
     wake_sensor_temp: float | None = None,
     wake_target_temp: float | None = None,
     wake_boost_temp: float | None = None,
+    season_start_month: int | None = None,
+    season_end_month: int | None = None,
+    frost_protect_temp: float | None = None,
+    mild_outdoor_threshold: float | None = None,
+    mild_setback: float | None = None,
 ) -> HeatingDecision:
     if away_active:
         return HeatingDecision(away_temp, "heat", "away")
+
+    # A hard calendar gate, independent of any single cold reading - a chilly
+    # August night must not trigger heating just because it dips below
+    # whatever threshold, only the configured season does.
+    if season_start_month is not None and season_end_month is not None:
+        if not in_heating_season(now, season_start_month, season_end_month):
+            floor = frost_protect_temp if frost_protect_temp is not None else 7.0
+            if current_indoor_temp is not None and current_indoor_temp < floor:
+                return HeatingDecision(floor, "heat", "frost protection (mimo topnou sezónu)")
+            return HeatingDecision(floor, "off", "mimo topnou sezónu")
 
     # A dedicated wake sensor (e.g. a bedroom ThermoPro) takes over the whole
     # "what should happen before the alarm" question; the visual weekplan's
@@ -239,9 +268,23 @@ def compute_decision(
     block = block_for(weekplan, now, schedule_garmin_alarms)
     mode = block.get("mode", "comfort")
     temp = float(block["temp"])
-    if eco_active:
-        temp -= eco_setback
+
+    # Eco and "mild day" both want to shave degrees off the scheduled
+    # target; take whichever wants more rather than stacking both, so a
+    # mild eco day doesn't get double-punished.
+    eco_component = eco_setback if eco_active else 0.0
+    mild_active = (
+        mild_outdoor_threshold is not None
+        and outdoor_forecast_temp is not None
+        and outdoor_forecast_temp >= mild_outdoor_threshold
+    )
+    mild_component = mild_setback if (mild_active and mild_setback is not None) else 0.0
+    setback = max(eco_component, mild_component)
+    temp -= setback
 
     if mode == "off":
         return HeatingDecision(temp, "off", "scheduled off")
-    return HeatingDecision(temp, "heat", f"scheduled {mode}")
+    reason = f"scheduled {mode}"
+    if setback > 0 and mild_component >= eco_component:
+        reason += " (mírný den)"
+    return HeatingDecision(temp, "heat", reason)
