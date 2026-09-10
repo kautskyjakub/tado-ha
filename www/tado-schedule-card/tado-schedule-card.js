@@ -14,7 +14,8 @@
  *   eco_switch: switch.living_room_eco_mode
  *   away_switch: switch.living_room_away_mode
  *   away_number: number.living_room_away_temperature
- *   weekplan_sensor: sensor.living_room_weekplan
+ *   weekplan_sensor: sensor.living_room_week_plan
+ *   decision_sensor: sensor.living_room_current_decision           # optional
  *   next_change_sensor: sensor.living_room_next_schedule_change   # optional
  *   next_garmin_sensor: sensor.living_room_next_garmin_wake       # optional
  *   min_temp: 10   # optional, defaults 5
@@ -419,9 +420,8 @@ class TadoScheduleCard extends HTMLElement {
       $("#next-change").textContent = state.state !== "unknown" ? `další změna: ${new Date(state.state).toLocaleString()}` : "";
     }
 
-    const decisionSensorId = this._config.decision_sensor || `sensor.${this._slug()}_current_decision`;
-    if (this._hass.states[decisionSensorId]) {
-      $("#decision-reason").textContent = this._hass.states[decisionSensorId].state;
+    if (this._config.decision_sensor && this._hass.states[this._config.decision_sensor]) {
+      $("#decision-reason").textContent = this._hass.states[this._config.decision_sensor].state;
     }
 
     if (this._config.next_garmin_sensor && this._hass.states[this._config.next_garmin_sensor]) {
@@ -439,10 +439,6 @@ class TadoScheduleCard extends HTMLElement {
       const weekplan = this._hass.states[this._config.weekplan_sensor].attributes.weekplan;
       if (weekplan) this._loadWeekplan(weekplan);
     }
-  }
-
-  _slug() {
-    return this._config.climate_entity.split(".")[1] || "";
   }
 
   _loadWeekplan(weekplan) {
