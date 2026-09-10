@@ -1,0 +1,41 @@
+set_schedule:
+  name: Set weekly schedule
+  description: Overwrites the weekly heating plan for one zone. Used by the tado-schedule-card.
+  fields:
+    config_entry_id:
+      name: Zone (config entry ID)
+      description: The config_entry_id of the tado_schedule zone to update.
+      required: true
+      selector:
+        text:
+    weekplan:
+      name: Week plan
+      description: >-
+        Object keyed by mon/tue/wed/thu/fri/sat/sun, each a list of
+        {start: "HH:MM", temp: number, mode: comfort|eco|off} blocks. The
+        first block of each day must start at "00:00".
+      required: true
+      selector:
+        object:
+
+get_schedule:
+  name: Get weekly schedule
+  description: Returns the current weekly heating plan for one zone.
+  fields:
+    config_entry_id:
+      name: Zone (config entry ID)
+      description: The config_entry_id of the tado_schedule zone to read.
+      required: true
+      selector:
+        text:
+
+sync_garmin_now:
+  name: Sync Garmin alarms now
+  description: Forces an immediate refresh of Garmin Connect alarms for one zone, instead of waiting for the next scheduled poll.
+  fields:
+    config_entry_id:
+      name: Zone (config entry ID)
+      description: The config_entry_id of the tado_schedule zone to sync.
+      required: true
+      selector:
+        text:
