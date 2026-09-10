@@ -29,7 +29,11 @@ class FakeGarmin:
         self.login_calls += 1
         self.tokenstore = tokenstore
         if self.needs_mfa_on_login:
-            return "needs_mfa", {"client": "fake-client-state"}
+            # Real garminconnect (>=0.3.x) always returns None here - the
+            # actual pending-login state lives internally on the Client
+            # object, not in this tuple - so tests must not rely on a
+            # truthy value to represent "MFA is pending".
+            return "needs_mfa", None
         return None, "legacy-token"
 
     def resume_login(self, client_state, mfa_code):
@@ -79,7 +83,10 @@ def test_submit_mfa_code_resumes_and_persists_session():
 
     assert client.mfa_pending is False
     fake = FakeGarmin.instances[0]
-    assert fake.resume_calls == [({"client": "fake-client-state"}, "123456")]
+    # The client_state passed through is whatever login() handed back
+    # (None, in real garminconnect >=0.3.x) - resume_login() ignores it
+    # anyway and uses the Client object's own internal pending state.
+    assert fake.resume_calls == [(None, "123456")]
     fake.client.dump.assert_called_once_with("/tmp/tokenstore")
 
 

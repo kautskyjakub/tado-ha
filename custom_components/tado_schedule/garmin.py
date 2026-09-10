@@ -59,11 +59,19 @@ class GarminAlarmClient:
         self._password = password
         self._tokenstore_path = tokenstore_path
         self._api: Any | None = None
-        self._pending_mfa_state: dict[str, Any] | None = None
+        self._mfa_pending: bool = False
+        # Passed through to resume_login() for older garminconnect releases
+        # that actually used it; recent releases (>=0.3.x) ignore this
+        # argument and keep the real pending-login state on the Client
+        # object itself (self._api.client), which is why mfa_pending above
+        # is tracked as its own bool instead of "this value is not None" -
+        # the library now always hands back None here even while a login
+        # genuinely is stuck waiting on a code.
+        self._mfa_client_state: Any | None = None
 
     @property
     def mfa_pending(self) -> bool:
-        return self._pending_mfa_state is not None
+        return self._mfa_pending
 
     def connect(self) -> None:
         """Blocking login - must be run in an executor. Raises GarminMfaRequired
@@ -74,18 +82,21 @@ class GarminAlarmClient:
         mfa_status, state_or_token = api.login(tokenstore=self._tokenstore_path)
         self._api = api
         if mfa_status == "needs_mfa":
-            self._pending_mfa_state = state_or_token
+            self._mfa_pending = True
+            self._mfa_client_state = state_or_token
             raise GarminMfaRequired()
-        self._pending_mfa_state = None
+        self._mfa_pending = False
+        self._mfa_client_state = None
 
     def submit_mfa_code(self, code: str) -> None:
         """Blocking - must be run in an executor. Resumes the login connect()
         paused on, and persists the resulting session so this is only ever
         needed once."""
-        if self._api is None or self._pending_mfa_state is None:
+        if self._api is None or not self._mfa_pending:
             raise GarminMfaRequired("No pending Garmin login to resume")
-        self._api.resume_login(self._pending_mfa_state, code)
-        self._pending_mfa_state = None
+        self._api.resume_login(self._mfa_client_state, code)
+        self._mfa_pending = False
+        self._mfa_client_state = None
         # resume_login() (unlike a plain login()) does not persist the new
         # session by itself - without this, the next restart would ask for
         # another MFA code even though we just completed one.
@@ -99,7 +110,7 @@ class GarminAlarmClient:
         never silently starts a *second* login attempt while one is already
         pending, which would just email out another code and confuse things.
         """
-        if self._pending_mfa_state is not None:
+        if self._mfa_pending:
             raise GarminMfaRequired()
         if self._api is None:
             self.connect()
