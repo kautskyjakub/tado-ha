@@ -124,6 +124,8 @@ class GarminAlarmClient:
             self.connect()
             raw_alarms = self._api.get_device_alarms()
 
+        _LOGGER.debug("Garmin get_device_alarms() returned %d raw entries: %s", len(raw_alarms or []), raw_alarms)
+
         alarms: list[GarminAlarm] = []
         for raw in raw_alarms or []:
             alarm = _parse_alarm(raw)
