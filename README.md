@@ -134,10 +134,10 @@ max_temp: 28
 | `number.<zone>_wake_ready_buffer_minutes` | number | kolik minut před budíkem/blokem má být už teplo |
 | `number.<zone>_wake_target_temperature` | number | cílová teplota **na wake sensoru** (např. 24 °C v ložnici) |
 | `number.<zone>_wake_boost_temperature` | number | jak vysoko se nastaví termostat v obýváku, aby jistě topil, dokud wake sensor nedosáhne cíle |
-| `number.<zone>_season_start_month` / `..._season_end_month` | number | 1–12, měsíce topné sezóny (výchozí 10 a 4 = říjen–duben, přes přelom roku) |
-| `number.<zone>_frost_protect_temperature` | number | bezpečnostní minimum mimo sezónu (výchozí 7 °C) |
-| `number.<zone>_mild_outdoor_threshold` | number | venkovní teplota, nad kterou se počítá s "mírným dnem" (výchozí 16 °C) |
-| `number.<zone>_mild_setback` | number | o kolik °C se sníží cílovka v mírný den (výchozí 3 °C) |
+| `number.<zone>_heating_season_start_month_1_12` / `..._heating_season_end_month_1_12` | number | 1–12, měsíce topné sezóny (výchozí 10 a 4 = říjen–duben, přes přelom roku) |
+| `number.<zone>_frost_protection_floor_outside_season` | number | bezpečnostní minimum mimo sezónu (výchozí 7 °C) |
+| `number.<zone>_mild_day_outdoor_threshold` | number | venkovní teplota, nad kterou se počítá s "mírným dnem" (výchozí 16 °C) |
+| `number.<zone>_mild_day_setback` | number | o kolik °C se sníží cílovka v mírný den (výchozí 3 °C) |
 | `switch.<zone>_eco_mode` | switch | zapíná/vypíná eco setback |
 | `switch.<zone>_away_mode` | switch | přepne na teplotu "pryč" |
 | `sensor.<zone>_current_decision` | sensor | proč se topí/netopí právě teď (`scheduled comfort`, `preheating for 06:30`, `away`, ...) |
