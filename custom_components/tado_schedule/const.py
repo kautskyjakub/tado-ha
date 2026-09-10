@@ -25,6 +25,11 @@ DEFAULT_OUTDOOR_SENSITIVITY = 0.03  # extra fraction of warmup time per degree c
 DEFAULT_WAKE_READY_BUFFER_MINUTES = 0  # how many minutes before the alarm the room should already be at temp
 DEFAULT_WAKE_TARGET_TEMP = 22.0  # target reading on the wake sensor (e.g. bedroom) by alarm time
 DEFAULT_WAKE_BOOST_TEMP = 26.0  # thermostat setpoint used to force a heat call while preheating the wake room
+DEFAULT_SEASON_START_MONTH = 10  # October
+DEFAULT_SEASON_END_MONTH = 4  # April - wraps across the year boundary
+DEFAULT_FROST_PROTECT_TEMP = 7.0  # safety floor while outside the heating season
+DEFAULT_MILD_OUTDOOR_THRESHOLD = 16.0  # outdoor temp above which passive/solar gain is assumed to help
+DEFAULT_MILD_SETBACK = 3.0  # degrees shaved off the scheduled target on a mild day
 
 UPDATE_INTERVAL_SECONDS = 300  # scheduler tick (weather/eco/schedule evaluation)
 GARMIN_UPDATE_INTERVAL_SECONDS = 1800  # alarm polling, keep well under Garmin rate limits

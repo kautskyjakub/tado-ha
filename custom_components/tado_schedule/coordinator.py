@@ -12,9 +12,14 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DEFAULT_AWAY_TEMP,
     DEFAULT_ECO_SETBACK,
+    DEFAULT_FROST_PROTECT_TEMP,
     DEFAULT_MAX_PREHEAT_MINUTES,
+    DEFAULT_MILD_OUTDOOR_THRESHOLD,
+    DEFAULT_MILD_SETBACK,
     DEFAULT_OUTDOOR_BASELINE_C,
     DEFAULT_OUTDOOR_SENSITIVITY,
+    DEFAULT_SEASON_END_MONTH,
+    DEFAULT_SEASON_START_MONTH,
     DEFAULT_WAKE_BOOST_TEMP,
     DEFAULT_WAKE_READY_BUFFER_MINUTES,
     DEFAULT_WAKE_TARGET_TEMP,
@@ -44,6 +49,11 @@ class TunableSettings:
     wake_ready_buffer_minutes: int = DEFAULT_WAKE_READY_BUFFER_MINUTES
     wake_target_temp: float = DEFAULT_WAKE_TARGET_TEMP
     wake_boost_temp: float = DEFAULT_WAKE_BOOST_TEMP
+    season_start_month: int = DEFAULT_SEASON_START_MONTH
+    season_end_month: int = DEFAULT_SEASON_END_MONTH
+    frost_protect_temp: float = DEFAULT_FROST_PROTECT_TEMP
+    mild_outdoor_threshold: float = DEFAULT_MILD_OUTDOOR_THRESHOLD
+    mild_setback: float = DEFAULT_MILD_SETBACK
 
 
 class GarminAlarmCoordinator(DataUpdateCoordinator[list[GarminAlarm]]):
@@ -113,6 +123,11 @@ class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):
             wake_sensor_temp=self._wake_sensor_temp(),
             wake_target_temp=self.settings.wake_target_temp if self.wake_sensor_entity_id else None,
             wake_boost_temp=self.settings.wake_boost_temp,
+            season_start_month=self.settings.season_start_month,
+            season_end_month=self.settings.season_end_month,
+            frost_protect_temp=self.settings.frost_protect_temp,
+            mild_outdoor_threshold=self.settings.mild_outdoor_threshold,
+            mild_setback=self.settings.mild_setback,
         )
         await self._async_apply_decision(decision)
         return decision

@@ -5,6 +5,7 @@ from custom_components.tado_schedule.decision import (
     compute_decision,
     compute_wake_decision,
     estimate_preheat_minutes,
+    in_heating_season,
     next_comfort_transition,
 )
 from custom_components.tado_schedule.garmin import GarminAlarm
@@ -252,3 +253,155 @@ def test_away_mode_still_overrides_wake_sensor_preheat():
     )
     assert decision.reason == "away"
     assert decision.target_temp == BASE_KWARGS["away_temp"]
+
+
+# ---------- heating season gate + mild-day setback ----------
+
+
+def test_in_heating_season_handles_wraparound_october_to_april():
+    # October through April, wrapping across the year boundary.
+    assert in_heating_season(datetime(2026, 1, 15), 10, 4) is True
+    assert in_heating_season(datetime(2026, 10, 1), 10, 4) is True
+    assert in_heating_season(datetime(2026, 4, 30), 10, 4) is True
+    assert in_heating_season(datetime(2026, 7, 15), 10, 4) is False
+    assert in_heating_season(datetime(2026, 9, 30), 10, 4) is False
+
+
+def test_in_heating_season_non_wrapping_range():
+    assert in_heating_season(datetime(2026, 3, 1), 2, 5) is True
+    assert in_heating_season(datetime(2026, 6, 1), 2, 5) is False
+
+
+def test_off_season_cold_summer_night_does_not_trigger_heating():
+    weekplan = weekday_plan()
+    # A chilly August night below every sane instantaneous threshold - must
+    # NOT heat, because the calendar gate (not a temperature reading) decides.
+    now = datetime(2026, 8, 10, 3, 0)
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 19.0,
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "frost_protect_temp": 7.0,
+        },
+    )
+    assert decision.hvac_mode == "off"
+    assert decision.reason == "mimo topnou sezónu"
+
+
+def test_off_season_frost_protection_still_engages():
+    weekplan = weekday_plan()
+    now = datetime(2026, 8, 10, 3, 0)
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 6.0,  # below the frost floor even in August
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "frost_protect_temp": 7.0,
+        },
+    )
+    assert decision.hvac_mode == "heat"
+    assert decision.target_temp == 7.0
+    assert "frost protection" in decision.reason
+
+
+def test_in_season_normal_schedule_applies_when_season_configured():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    now = datetime(2026, 1, 14, 8, 0)  # January, well inside 10..4
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 19.0,
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "frost_protect_temp": 7.0,
+        },
+    )
+    assert decision.hvac_mode == "heat"
+    assert decision.target_temp == 21.0
+    assert decision.reason == "scheduled comfort"
+
+
+def test_mild_day_reduces_target_instead_of_skipping():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    now = datetime(2026, 3, 14, 8, 0)  # inside season, but a mild March day
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 19.0,
+            "outdoor_forecast_temp": 18.0,
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "mild_outdoor_threshold": 16.0,
+            "mild_setback": 3.0,
+        },
+    )
+    assert decision.hvac_mode == "heat"
+    assert decision.target_temp == 18.0  # 21 - 3
+    assert "mírný den" in decision.reason
+
+
+def test_mild_day_and_eco_do_not_stack():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    now = datetime(2026, 3, 14, 8, 0)
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "eco_active": True,
+            "eco_setback": 2.0,
+            "current_indoor_temp": 19.0,
+            "outdoor_forecast_temp": 18.0,
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "mild_outdoor_threshold": 16.0,
+            "mild_setback": 3.0,
+        },
+    )
+    # mild (3) beats eco (2) - only the larger setback applies, not both.
+    assert decision.target_temp == 18.0
+
+
+def test_cold_day_in_season_does_not_get_mild_setback():
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    now = datetime(2026, 1, 14, 8, 0)
+    decision = compute_decision(
+        now,
+        weekplan,
+        [],
+        **{
+            **BASE_KWARGS,
+            "current_indoor_temp": 19.0,
+            "outdoor_forecast_temp": 2.0,
+            "season_start_month": 10,
+            "season_end_month": 4,
+            "mild_outdoor_threshold": 16.0,
+            "mild_setback": 3.0,
+        },
+    )
+    assert decision.target_temp == 21.0
+    assert "mírný den" not in decision.reason
+
+
+def test_season_gate_skipped_when_not_configured():
+    # Existing behaviour (no season kwargs passed) must be untouched.
+    weekplan = weekday_plan(comfort_start="06:30", comfort_temp=21.0)
+    now = datetime(2026, 8, 10, 3, 0)
+    decision = compute_decision(now, weekplan, [], **BASE_KWARGS)
+    assert decision.hvac_mode == "heat"
