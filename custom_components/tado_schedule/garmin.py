@@ -30,6 +30,11 @@ class GarminMfaRequired(Exception):
 # Garmin encodes alarm weekdays as 1=Monday..7=Sunday in most firmware builds.
 _GARMIN_WEEKDAY_TO_INDEX = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6}
 
+# get_device_alarms() sends alarmDays as Garmin's own short-form day
+# abbreviations ("M", "Tu", "W", "Th", "F", "Sa", "Su") - not three-letter
+# codes, so a plain [:3] match against "mon"/"tue"/... never hits.
+_GARMIN_DAY_ABBR_TO_INDEX = {"m": 0, "tu": 1, "w": 2, "th": 3, "f": 4, "sa": 5, "su": 6}
+
 
 @dataclass
 class GarminAlarm:
@@ -135,7 +140,15 @@ class GarminAlarmClient:
 
 
 def _parse_alarm(raw: dict[str, Any]) -> GarminAlarm | None:
-    enabled = bool(raw.get("alarmEnabled") or raw.get("enabled") or raw.get("alarmStatus") == "ENABLED")
+    # A Forerunner's get_device_alarms() entry looks like {"alarmMode": "ON"/"OFF", ...} -
+    # none of alarmEnabled/enabled/alarmStatus (kept below for other device/API shapes)
+    # are actually populated on it.
+    enabled = bool(
+        raw.get("alarmEnabled")
+        or raw.get("enabled")
+        or raw.get("alarmStatus") == "ENABLED"
+        or raw.get("alarmMode") == "ON"
+    )
     if not enabled:
         return None
 
@@ -159,10 +172,19 @@ def _parse_alarm(raw: dict[str, Any]) -> GarminAlarm | None:
         if isinstance(wd, int) and wd in _GARMIN_WEEKDAY_TO_INDEX:
             weekdays.add(_GARMIN_WEEKDAY_TO_INDEX[wd])
         elif isinstance(wd, str):
-            wd_norm = wd.strip().lower()[:3]
-            for idx, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
-                if wd_norm == name:
-                    weekdays.add(idx)
+            wd_norm = wd.strip().lower()
+            idx = _GARMIN_DAY_ABBR_TO_INDEX.get(wd_norm)
+            if idx is None:
+                # Fall back to matching a full/three-letter name (e.g. some
+                # API shapes send "Monday" or "mon" instead of Garmin's own
+                # short form "M"/"Tu"/"W"/"Th"/"F"/"Sa"/"Su").
+                wd_norm3 = wd_norm[:3]
+                for candidate_idx, name in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]):
+                    if wd_norm3 == name:
+                        idx = candidate_idx
+                        break
+            if idx is not None:
+                weekdays.add(idx)
     if not weekdays:
         # A one-shot alarm ("tomorrow only") - Garmin's app treats it as every
         # day until dismissed; do the same so it still drives the wake block.

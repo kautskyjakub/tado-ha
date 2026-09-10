@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.tado_schedule.garmin import GarminAlarmClient, GarminMfaRequired
+from custom_components.tado_schedule.garmin import GarminAlarmClient, GarminMfaRequired, _parse_alarm
 
 
 class FakeGarmin:
@@ -125,3 +125,32 @@ def test_submit_mfa_code_without_pending_login_raises():
     client = GarminAlarmClient("a@b.com", "pw", "/tmp/tokenstore")
     with pytest.raises(GarminMfaRequired):
         client.submit_mfa_code("000000")
+
+
+def test_parse_alarm_handles_real_forerunner_payload_shape():
+    # Captured verbatim from a real get_device_alarms() response - Forerunner
+    # sends "alarmMode": "ON"/"OFF" (not alarmEnabled/enabled/alarmStatus)
+    # and short-form day abbreviations (not "mon"/"tue"/... or 1-7 ints).
+    weekday_alarm = {
+        "alarmMode": "ON",
+        "alarmTime": 360,
+        "alarmDays": ["M", "Tu", "W", "Th", "F"],
+        "alarmSound": "TONE_AND_VIBRATION",
+        "alarmId": 1777366077,
+        "changeState": "UNCHANGED",
+        "backlight": "ON",
+        "enabled": None,
+        "alarmMessage": None,
+        "alarmImageId": None,
+        "alarmIcon": None,
+        "alarmType": None,
+    }
+    weekend_alarm_off = {**weekday_alarm, "alarmMode": "OFF", "alarmTime": 475, "alarmDays": ["Sa", "Su"]}
+
+    parsed = _parse_alarm(weekday_alarm)
+    assert parsed is not None
+    assert parsed.time_of_day.hour == 6
+    assert parsed.time_of_day.minute == 0
+    assert parsed.weekdays == {0, 1, 2, 3, 4}  # Mon-Fri
+
+    assert _parse_alarm(weekend_alarm_off) is None
