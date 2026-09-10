@@ -33,8 +33,6 @@ const MODE_COLOR = {
   eco: "var(--tado-eco-color, #4caf7d)",
   off: "var(--tado-off-color, #3a3f4b)",
 };
-const MODE_LABEL = { comfort: "Comfort", eco: "Eco", off: "Off" };
-const MODE_ICON = { comfort: "mdi:sofa", eco: "mdi:leaf", off: "mdi:power" };
 
 function slotToTime(slot) {
   const h = Math.floor(slot / 2);
