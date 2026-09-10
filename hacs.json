@@ -1,0 +1,7 @@
+{
+  "name": "Tado Schedule (local, Matter-based)",
+  "render_readme": true,
+  "content_in_root": false,
+  "filename": "tado_schedule.zip",
+  "zip_release": false
+}

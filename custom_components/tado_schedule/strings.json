@@ -1,0 +1,63 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Tado Schedule zone",
+        "data": {
+          "zone_name": "Zone name",
+          "climate_entity": "Thermostat entity (the Matter-exposed tado X climate entity)",
+          "weather_entity": "Weather entity (optional, used for preheat forecasting)",
+          "wake_sensor_entity": "Wake sensor (optional, e.g. a bedroom ThermoPro temperature sensor - used only for the Garmin wake preheat)",
+          "garmin_email": "Garmin Connect email (optional)",
+          "garmin_password": "Garmin Connect password (optional)",
+          "garmin_weekdays": "Days the Garmin alarm should set the wake time"
+        }
+      }
+    },
+    "error": {
+      "garmin_credentials_incomplete": "Provide both a Garmin email and password, or leave both empty."
+    },
+    "abort": {
+      "already_configured": "This climate entity already has a Tado Schedule zone."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "weather_entity": "Weather entity",
+          "wake_sensor_entity": "Wake sensor (e.g. a bedroom ThermoPro temperature sensor)",
+          "garmin_email": "Garmin Connect email",
+          "garmin_password": "Garmin Connect password",
+          "garmin_weekdays": "Days the Garmin alarm should set the wake time"
+        }
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "away_temperature": { "name": "Away temperature" },
+      "eco_setback": { "name": "Eco setback" },
+      "warmup_minutes_per_degree": { "name": "Warm-up minutes per degree" },
+      "max_preheat_minutes": { "name": "Max preheat lead time" },
+      "outdoor_baseline_temp": { "name": "Outdoor baseline temperature" },
+      "outdoor_sensitivity": { "name": "Outdoor sensitivity" },
+      "wake_ready_buffer_minutes": { "name": "Wake ready buffer" },
+      "wake_target_temperature": { "name": "Wake sensor target temperature" },
+      "wake_boost_temperature": { "name": "Wake preheat boost temperature" }
+    },
+    "switch": {
+      "eco_mode": { "name": "Eco mode" },
+      "away_mode": { "name": "Away mode" }
+    },
+    "sensor": {
+      "current_decision": { "name": "Current decision" },
+      "next_schedule_change": { "name": "Next schedule change" },
+      "next_garmin_wake": { "name": "Next Garmin wake" },
+      "weekplan": { "name": "Week plan" }
+    },
+    "button": {
+      "sync_garmin_now": { "name": "Sync Garmin alarms now" }
+    }
+  }
+}
