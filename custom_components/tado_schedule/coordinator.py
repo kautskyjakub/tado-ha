@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
+from homeassistant.components.persistent_notification import async_create, async_dismiss
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -13,6 +14,8 @@ from .const import (
     DEFAULT_AWAY_TEMP,
     DEFAULT_ECO_SETBACK,
     DEFAULT_FROST_PROTECT_TEMP,
+    DEFAULT_GARMIN_SYNC_HOUR_1,
+    DEFAULT_GARMIN_SYNC_HOUR_2,
     DEFAULT_MAX_PREHEAT_MINUTES,
     DEFAULT_MILD_OUTDOOR_THRESHOLD,
     DEFAULT_MILD_SETBACK,
@@ -24,11 +27,11 @@ from .const import (
     DEFAULT_WAKE_READY_BUFFER_MINUTES,
     DEFAULT_WAKE_TARGET_TEMP,
     DEFAULT_WARMUP_MINUTES_PER_DEGREE,
-    GARMIN_UPDATE_INTERVAL_SECONDS,
+    DOMAIN,
     UPDATE_INTERVAL_SECONDS,
 )
 from .decision import HeatingDecision, compute_decision
-from .garmin import GarminAlarm, GarminAlarmClient
+from .garmin import GarminAlarm, GarminAlarmClient, GarminMfaRequired
 from .schedule_store import WeekplanStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,22 +57,53 @@ class TunableSettings:
     frost_protect_temp: float = DEFAULT_FROST_PROTECT_TEMP
     mild_outdoor_threshold: float = DEFAULT_MILD_OUTDOOR_THRESHOLD
     mild_setback: float = DEFAULT_MILD_SETBACK
+    garmin_sync_hour_1: int = DEFAULT_GARMIN_SYNC_HOUR_1
+    garmin_sync_hour_2: int = DEFAULT_GARMIN_SYNC_HOUR_2
 
 
 class GarminAlarmCoordinator(DataUpdateCoordinator[list[GarminAlarm]]):
-    """Polls Garmin Connect for the current set of enabled alarms."""
+    """Fetches Garmin Connect alarms - on demand only (see __init__.py's hourly
+    trigger, which calls async_request_refresh() at the configured sync hours),
+    not on a fixed polling interval. A wake time set at bedtime doesn't need
+    checking every 30 minutes all day, and Garmin's API is easy to over-poll."""
 
-    def __init__(self, hass: HomeAssistant, email: str, password: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry_id: str, email: str, password: str, tokenstore_path: str) -> None:
         super().__init__(
             hass,
             _LOGGER,
             name="tado_schedule_garmin_alarms",
-            update_interval=timedelta(seconds=GARMIN_UPDATE_INTERVAL_SECONDS),
+            update_interval=None,
         )
-        self._client = GarminAlarmClient(email, password)
+        self._entry_id = entry_id
+        self._client = GarminAlarmClient(email, password, tokenstore_path)
+
+    @property
+    def _mfa_notification_id(self) -> str:
+        return f"{DOMAIN}_garmin_mfa_{self._entry_id}"
 
     async def _async_update_data(self) -> list[GarminAlarm]:
-        return await self.hass.async_add_executor_job(self._client.fetch_alarms)
+        try:
+            alarms = await self.hass.async_add_executor_job(self._client.fetch_alarms)
+        except GarminMfaRequired:
+            async_create(
+                self.hass,
+                (
+                    "Garmin Connect potřebuje jednorázový kód, který ti právě poslal "
+                    "e-mailem/SMS, aby dokončil přihlášení. Zavolej službu "
+                    f"`tado_schedule.submit_garmin_mfa_code` s `config_entry_id: {self._entry_id}` "
+                    "a `code: <kód>`."
+                ),
+                title="Tado Schedule – Garmin potřebuje kód",
+                notification_id=self._mfa_notification_id,
+            )
+            return self.data or []
+        async_dismiss(self.hass, self._mfa_notification_id)
+        return alarms
+
+    async def async_submit_mfa_code(self, code: str) -> None:
+        await self.hass.async_add_executor_job(self._client.submit_mfa_code, code)
+        async_dismiss(self.hass, self._mfa_notification_id)
+        await self.async_request_refresh()
 
 
 class TadoScheduleCoordinator(DataUpdateCoordinator[HeatingDecision]):

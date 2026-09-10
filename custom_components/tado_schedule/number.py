@@ -17,6 +17,7 @@ from .coordinator import TadoScheduleCoordinator, TunableSettings
 @dataclass(frozen=True, kw_only=True)
 class TadoNumberDescription(NumberEntityDescription):
     attr: str = ""
+    garmin_only: bool = False
 
 
 NUMBERS: tuple[TadoNumberDescription, ...] = (
@@ -183,14 +184,42 @@ NUMBERS: tuple[TadoNumberDescription, ...] = (
         icon="mdi:white-balance-sunny",
         entity_category=EntityCategory.CONFIG,
     ),
+    TadoNumberDescription(
+        key="garmin_sync_hour_1",
+        attr="garmin_sync_hour_1",
+        translation_key="garmin_sync_hour_1",
+        native_min_value=0,
+        native_max_value=23,
+        native_step=1,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        mode=NumberMode.BOX,
+        icon="mdi:clock-time-two-outline",
+        entity_category=EntityCategory.CONFIG,
+        garmin_only=True,
+    ),
+    TadoNumberDescription(
+        key="garmin_sync_hour_2",
+        attr="garmin_sync_hour_2",
+        translation_key="garmin_sync_hour_2",
+        native_min_value=0,
+        native_max_value=23,
+        native_step=1,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        mode=NumberMode.BOX,
+        icon="mdi:clock-time-five-outline",
+        entity_category=EntityCategory.CONFIG,
+        garmin_only=True,
+    ),
 )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     entry_data = hass.data[DOMAIN][entry.entry_id]
+    has_garmin = entry_data["garmin_coordinator"] is not None
     async_add_entities(
         TadoScheduleNumber(entry.entry_id, entry_data["coordinator"], entry_data["settings"], entry_data["device_info"], description)
         for description in NUMBERS
+        if not description.garmin_only or has_garmin
     )
 
 

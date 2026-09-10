@@ -7,7 +7,15 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from .const import ATTR_WEEKPLAN, DOMAIN, SERVICE_GET_SCHEDULE, SERVICE_SET_SCHEDULE, SERVICE_SYNC_GARMIN
+from .const import (
+    ATTR_MFA_CODE,
+    ATTR_WEEKPLAN,
+    DOMAIN,
+    SERVICE_GET_SCHEDULE,
+    SERVICE_SET_SCHEDULE,
+    SERVICE_SUBMIT_GARMIN_MFA_CODE,
+    SERVICE_SYNC_GARMIN,
+)
 
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 
@@ -18,6 +26,12 @@ SET_SCHEDULE_SCHEMA = vol.Schema(
     }
 )
 ENTRY_ONLY_SCHEMA = vol.Schema({vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string})
+SUBMIT_MFA_CODE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MFA_CODE): cv.string,
+    }
+)
 
 
 def _entry_data(hass: HomeAssistant, entry_id: str) -> dict:
@@ -47,6 +61,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         await entry["garmin_coordinator"].async_request_refresh()
         await entry["coordinator"].async_request_refresh()
 
+    async def handle_submit_garmin_mfa_code(call: ServiceCall) -> None:
+        entry = _entry_data(hass, call.data[ATTR_CONFIG_ENTRY_ID])
+        if entry["garmin_coordinator"] is None:
+            raise ServiceValidationError("This zone has no Garmin account configured")
+        await entry["garmin_coordinator"].async_submit_mfa_code(call.data[ATTR_MFA_CODE])
+        await entry["coordinator"].async_request_refresh()
+
     hass.services.async_register(DOMAIN, SERVICE_SET_SCHEDULE, handle_set_schedule, schema=SET_SCHEDULE_SCHEMA)
     hass.services.async_register(
         DOMAIN,
@@ -56,3 +77,6 @@ def async_register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(DOMAIN, SERVICE_SYNC_GARMIN, handle_sync_garmin, schema=ENTRY_ONLY_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, SERVICE_SUBMIT_GARMIN_MFA_CODE, handle_submit_garmin_mfa_code, schema=SUBMIT_MFA_CODE_SCHEMA
+    )

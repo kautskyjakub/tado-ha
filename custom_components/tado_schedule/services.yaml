@@ -39,3 +39,23 @@ sync_garmin_now:
       required: true
       selector:
         text:
+
+submit_garmin_mfa_code:
+  name: Submit Garmin MFA code
+  description: >-
+    Completes a Garmin Connect login that's waiting on the one-time code
+    Garmin just emailed/texted (see the persistent notification). Only ever
+    needed once - the resulting session is saved and reused after that.
+  fields:
+    config_entry_id:
+      name: Zone (config entry ID)
+      description: The config_entry_id of the tado_schedule zone whose Garmin login is pending.
+      required: true
+      selector:
+        text:
+    code:
+      name: Code
+      description: The one-time code from Garmin's email/SMS.
+      required: true
+      selector:
+        text:

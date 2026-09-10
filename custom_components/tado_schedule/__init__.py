@@ -12,6 +12,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
     CONF_CLIMATE_ENTITY,
@@ -41,7 +42,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     garmin_coordinator: GarminAlarmCoordinator | None = None
     if data.get(CONF_GARMIN_EMAIL) and data.get(CONF_GARMIN_PASSWORD):
-        garmin_coordinator = GarminAlarmCoordinator(hass, data[CONF_GARMIN_EMAIL], data[CONF_GARMIN_PASSWORD])
+        tokenstore_path = hass.config.path(f".storage/{DOMAIN}_garmin_{entry.entry_id}")
+        garmin_coordinator = GarminAlarmCoordinator(
+            hass, entry.entry_id, data[CONF_GARMIN_EMAIL], data[CONF_GARMIN_PASSWORD], tokenstore_path
+        )
         try:
             await garmin_coordinator.async_config_entry_first_refresh()
         except Exception:  # noqa: BLE001 - a bad Garmin login must not block the thermostat
@@ -74,10 +78,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "device_info": device_info,
     }
 
+    if garmin_coordinator is not None:
+        entry.async_on_unload(
+            async_track_time_change(
+                hass, _make_garmin_hourly_check(garmin_coordinator, settings), minute=0, second=0
+            )
+        )
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_register_services(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+def _make_garmin_hourly_check(garmin_coordinator: GarminAlarmCoordinator, settings: TunableSettings):
+    """An hourly tick that only actually syncs Garmin at the configured hours.
+
+    Reading settings.garmin_sync_hour_1/2 fresh on every tick (rather than
+    scheduling two fixed-hour triggers) means changing those number entities
+    takes effect immediately, no reload required - a wake time set at bedtime
+    is checked once after midnight and once more shortly before a typical
+    wake-up, as a cheap guard against a last-minute change, instead of
+    polling Garmin all day.
+    """
+
+    async def _check(now):
+        if now.hour in (settings.garmin_sync_hour_1, settings.garmin_sync_hour_2):
+            await garmin_coordinator.async_request_refresh()
+
+    return _check
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
