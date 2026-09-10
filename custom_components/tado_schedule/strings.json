@@ -49,7 +49,9 @@
       "season_end_month": { "name": "Heating season end month (1-12)" },
       "frost_protect_temperature": { "name": "Frost protection floor (outside season)" },
       "mild_outdoor_threshold": { "name": "Mild day outdoor threshold" },
-      "mild_setback": { "name": "Mild day setback" }
+      "mild_setback": { "name": "Mild day setback" },
+      "garmin_sync_hour_1": { "name": "Garmin sync hour (1st check)" },
+      "garmin_sync_hour_2": { "name": "Garmin sync hour (2nd check)" }
     },
     "switch": {
       "eco_mode": { "name": "Eco mode" },

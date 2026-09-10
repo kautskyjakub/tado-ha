@@ -10,12 +10,22 @@ contributes nothing to the schedule.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class GarminMfaRequired(Exception):
+    """Garmin is asking for the one-time code it just emailed/texted.
+
+    Raised by connect()/fetch_alarms() when a login is blocked on that code.
+    The caller is expected to surface this to the user (see coordinator.py)
+    and later call GarminAlarmClient.submit_mfa_code() with what they typed in.
+    """
 
 # Garmin encodes alarm weekdays as 1=Monday..7=Sunday in most firmware builds.
 _GARMIN_WEEKDAY_TO_INDEX = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6}
@@ -29,23 +39,68 @@ class GarminAlarm:
 
 
 class GarminAlarmClient:
-    """Logs into Garmin Connect and exposes enabled alarms per weekday."""
+    """Logs into Garmin Connect and exposes enabled alarms per weekday.
 
-    def __init__(self, email: str, password: str) -> None:
+    Login is two-phase because Garmin routinely challenges a login from a
+    new device (our HA server) with an emailed/texted one-time code:
+
+      1. connect() attempts the login. If a stored session in
+         `tokenstore_path` is still valid, this succeeds outright - no code
+         needed. Otherwise Garmin may demand MFA, in which case connect()
+         raises GarminMfaRequired and remembers where the login was paused.
+      2. submit_mfa_code() resumes that paused login with the code the user
+         read out of their email, and - importantly - saves the resulting
+         session to `tokenstore_path` so future restarts don't need MFA
+         again (until Garmin invalidates the session).
+    """
+
+    def __init__(self, email: str, password: str, tokenstore_path: str) -> None:
         self._email = email
         self._password = password
+        self._tokenstore_path = tokenstore_path
         self._api: Any | None = None
+        self._pending_mfa_state: dict[str, Any] | None = None
+
+    @property
+    def mfa_pending(self) -> bool:
+        return self._pending_mfa_state is not None
 
     def connect(self) -> None:
-        """Blocking login - must be run in an executor."""
+        """Blocking login - must be run in an executor. Raises GarminMfaRequired
+        if Garmin wants a one-time code before the login can complete."""
         from garminconnect import Garmin  # imported lazily, only used off the event loop
 
-        api = Garmin(self._email, self._password)
-        api.login()
+        api = Garmin(self._email, self._password, return_on_mfa=True)
+        mfa_status, state_or_token = api.login(tokenstore=self._tokenstore_path)
         self._api = api
+        if mfa_status == "needs_mfa":
+            self._pending_mfa_state = state_or_token
+            raise GarminMfaRequired()
+        self._pending_mfa_state = None
+
+    def submit_mfa_code(self, code: str) -> None:
+        """Blocking - must be run in an executor. Resumes the login connect()
+        paused on, and persists the resulting session so this is only ever
+        needed once."""
+        if self._api is None or self._pending_mfa_state is None:
+            raise GarminMfaRequired("No pending Garmin login to resume")
+        self._api.resume_login(self._pending_mfa_state, code)
+        self._pending_mfa_state = None
+        # resume_login() (unlike a plain login()) does not persist the new
+        # session by itself - without this, the next restart would ask for
+        # another MFA code even though we just completed one.
+        with contextlib.suppress(Exception):
+            self._api.client.dump(self._tokenstore_path)
 
     def fetch_alarms(self) -> list[GarminAlarm]:
-        """Blocking fetch - must be run in an executor. Returns [] on any failure."""
+        """Blocking fetch - must be run in an executor.
+
+        Raises GarminMfaRequired if a login is paused on a one-time code -
+        never silently starts a *second* login attempt while one is already
+        pending, which would just email out another code and confuse things.
+        """
+        if self._pending_mfa_state is not None:
+            raise GarminMfaRequired()
         if self._api is None:
             self.connect()
         assert self._api is not None
@@ -54,6 +109,7 @@ class GarminAlarmClient:
             raw_alarms = self._api.get_device_alarms()
         except Exception:  # noqa: BLE001 - Garmin session can expire at any time
             _LOGGER.warning("Garmin alarm fetch failed, retrying with a fresh login", exc_info=True)
+            self._api = None
             self.connect()
             raw_alarms = self._api.get_device_alarms()
 

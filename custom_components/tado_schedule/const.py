@@ -30,9 +30,10 @@ DEFAULT_SEASON_END_MONTH = 4  # April - wraps across the year boundary
 DEFAULT_FROST_PROTECT_TEMP = 7.0  # safety floor while outside the heating season
 DEFAULT_MILD_OUTDOOR_THRESHOLD = 16.0  # outdoor temp above which passive/solar gain is assumed to help
 DEFAULT_MILD_SETBACK = 3.0  # degrees shaved off the scheduled target on a mild day
+DEFAULT_GARMIN_SYNC_HOUR_1 = 2  # first daily Garmin alarm check (local time, 0-23)
+DEFAULT_GARMIN_SYNC_HOUR_2 = 5  # second check, as a guard against a late change to the alarm
 
 UPDATE_INTERVAL_SECONDS = 300  # scheduler tick (weather/eco/schedule evaluation)
-GARMIN_UPDATE_INTERVAL_SECONDS = 1800  # alarm polling, keep well under Garmin rate limits
 
 STORAGE_VERSION = 1
 STORAGE_KEY_PREFIX = "tado_schedule_weekplan"
@@ -43,5 +44,7 @@ WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_SYNC_GARMIN = "sync_garmin_now"
 SERVICE_GET_SCHEDULE = "get_schedule"
+SERVICE_SUBMIT_GARMIN_MFA_CODE = "submit_garmin_mfa_code"
 
 ATTR_WEEKPLAN = "weekplan"
+ATTR_MFA_CODE = "code"

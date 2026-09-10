@@ -53,7 +53,7 @@ chová podobně jako tado° appka, ale běží to celé lokálně u tebe doma.
 
 ```
 Garmin Connect (garminconnect knihovna, nepovinné)
-        │  budíky (polling ~30 min)
+        │  budíky (kontrola 1-2x denně, v nastavenou hodinu)
         ▼
 ┌─────────────────────────────┐        ┌──────────────────────────┐
 │ custom_components/          │        │ www/tado-schedule-card/  │
@@ -94,6 +94,23 @@ Garmin Connect (garminconnect knihovna, nepovinné)
 > instalaci `sensor.<zone>_next_garmin_wake` neplní, zapni si v HA logu debug
 > level pro `custom_components.tado_schedule.garmin` a podívej se, jaké klíče
 > tvůj účet reálně vrací (`_LOGGER.debug` to vypíše), a uprav `_parse_alarm`.
+
+> **Garmin dvoufázové ověření (MFA/OTP):** Garmin běžně vyžaduje jednorázový
+> kód (e-mailem/SMS) při přihlášení z nového zařízení — tvého HA serveru.
+> Pokud se to stane, integrace v logu i jako *persistent notification* v HA
+> napíše, že čeká na kód, a v HA se objeví notifikace s instrukcí. Kód pak
+> zadáš službou:
+>
+> ```yaml
+> action: tado_schedule.submit_garmin_mfa_code
+> data:
+>   config_entry_id: "<entry_id tvé zóny>"
+>   code: "123456"
+> ```
+>
+> Tohle je potřeba **jen jednou** — výsledná session se uloží do
+> `.storage/tado_schedule_garmin_<entry_id>` a znovu použije i po restartu
+> HA, dokud ji Garmin nezneplatní (např. při změně hesla).
 
 ### 2. Karta (`www/tado-schedule-card`)
 
@@ -138,6 +155,7 @@ max_temp: 28
 | `number.<zone>_frost_protection_floor_outside_season` | number | bezpečnostní minimum mimo sezónu (výchozí 7 °C) |
 | `number.<zone>_mild_day_outdoor_threshold` | number | venkovní teplota, nad kterou se počítá s "mírným dnem" (výchozí 16 °C) |
 | `number.<zone>_mild_day_setback` | number | o kolik °C se sníží cílovka v mírný den (výchozí 3 °C) |
+| `number.<zone>_garmin_sync_hour_1` / `..._garmin_sync_hour_2` | number | v kolik hodin (0–23) se má zkontrolovat Garmin budík — výchozí 2 a 5 (jen se zapnutým Garminem) |
 | `switch.<zone>_eco_mode` | switch | zapíná/vypíná eco setback |
 | `switch.<zone>_away_mode` | switch | přepne na teplotu "pryč" |
 | `sensor.<zone>_current_decision` | sensor | proč se topí/netopí právě teď (`scheduled comfort`, `preheating for 06:30`, `away`, ...) |
@@ -147,7 +165,20 @@ max_temp: 28
 | `button.<zone>_sync_garmin_now` | button | okamžitě obnoví budíky z Garminu |
 
 Services: `tado_schedule.set_schedule`, `tado_schedule.get_schedule`,
-`tado_schedule.sync_garmin_now` (viz `services.yaml`).
+`tado_schedule.sync_garmin_now`, `tado_schedule.submit_garmin_mfa_code`
+(viz `services.yaml`).
+
+## Kdy se kontroluje Garmin budík
+
+Místo dotazování Garminu každých pár desítek minut (zbytečné a snadno
+narazí na rate limit) se budík kontroluje jen ve dvou nastavitelných
+hodinách za den — výchozí **2:00** (budík na ráno se typicky nastavuje
+večer, takže krátce po půlnoci už je jistě platný) a **5:00** jako pojistka
+pro případ, že by sis budík ještě po druhé v noci přenastavil. Obě hodiny
+(`garmin_sync_hour_1`/`garmin_sync_hour_2`) jsou `number` entity, klidně
+uprav. K dispozici je i tlačítko/služba pro okamžitou synchronizaci
+(`button.<zone>_sync_garmin_now` / `tado_schedule.sync_garmin_now`), kdyby
+sis chtěl ověřit změnu hned.
 
 ## Jak funguje predikce vytápění (a proč je to heuristika)
 
@@ -246,6 +277,11 @@ doladi podle toho, jak moc/málo to skutečně vytápí.
   sensoru, brána topné sezóny včetně přelomu roku, odečet za mírný den a
   že se s eco nesčítá) má jednotkové testy v `tests/` — spustíš je čistým
   `pytest tests/` bez nutnosti mít nainstalovaný Home Assistant.
+- Stavový automat MFA v `garmin.py` (connect() narazí na výzvu k kódu,
+  fetch_alarms() nezačne druhé přihlášení, dokud první čeká na kód,
+  submit_mfa_code() dokončí přihlášení a uloží session) má vlastní testy
+  s mockovanou knihovnou `garminconnect` — reálný běh proti Garminu ale
+  otestovaný není (viz níže).
 - Převod mezi malovací mřížkou karty (48 slotů/den) a uloženými bloky
   (`blocksToSlots`/`slotsToBlocks`) byl ověřen ručním round-trip testem.
 - **Nebylo (a nemohlo být) otestováno proti reálné instalaci Home Assistant,
