@@ -26,7 +26,7 @@
  */
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const WEEKDAY_LABELS = { mon: "Po", tue: "Ú", wed: "St", thu: "Čt", fri: "Pá", sat: "So", sun: "Ne" };
+const WEEKDAY_LABELS = { mon: "Po", tue: "Út", wed: "St", thu: "Čt", fri: "Pá", sat: "So", sun: "Ne" };
 const SLOTS_PER_DAY = 48; // 30-minute resolution
 const MODE_COLOR = {
   comfort: "var(--tado-comfort-color, #ff8c3b)",
@@ -196,7 +196,7 @@ class TadoScheduleCard extends HTMLElement {
             </div>
             <div class="grid" id="grid"></div>
             <div class="grid-footer">
-              <span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>
+              <span>00</span><span>03</span><span>06</span><span>09</span><span>12</span><span>15</span><span>18</span><span>21</span><span>24</span>
             </div>
             <button class="save-btn" id="save-btn" hidden>Uložit rozvrh</button>
           </div>
@@ -368,6 +368,8 @@ class TadoScheduleCard extends HTMLElement {
       for (let s = 0; s < SLOTS_PER_DAY; s++) {
         const cell = document.createElement("div");
         cell.className = "grid-cell";
+        if (s !== 0 && s % 6 === 0) cell.classList.add("hour-major"); // every 3h, lines up with the footer labels
+        else if (s !== 0 && s % 2 === 0) cell.classList.add("hour-minor"); // every 1h
         cell.dataset.slot = String(s);
         cellsWrap.appendChild(cell);
       }
@@ -603,7 +605,9 @@ const STYLE = `
   .grid-cell { flex: 1; background: var(--tado-off-color, #3a3f4b); cursor: pointer; }
   .grid-cell:first-child { border-radius: 4px 0 0 4px; }
   .grid-cell:last-child { border-radius: 0 4px 4px 0; }
-  .grid-footer { display: flex; justify-content: space-between; font-size: 0.7em; opacity: 0.6; padding-left: 24px; }
+  .grid-cell.hour-minor { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.18); }
+  .grid-cell.hour-major { box-shadow: inset 2px 0 0 rgba(255, 255, 255, 0.4); }
+  .grid-footer { display: flex; justify-content: space-between; font-size: 0.65em; opacity: 0.6; padding-left: 24px; }
   .save-btn { margin-top: 10px; width: 100%; padding: 10px; border: none; border-radius: 8px;
     background: var(--primary-color); color: var(--text-primary-color, white); cursor: pointer; font-weight: 600; }
 `;
