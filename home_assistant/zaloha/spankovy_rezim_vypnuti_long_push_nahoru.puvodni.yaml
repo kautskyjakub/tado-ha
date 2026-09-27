@@ -1,0 +1,24 @@
+# Záloha PŮVODNÍ automatizace před úpravou pro simulaci úsvitu (2026-09-27).
+# entity_id: automation.spankovy_rezim_vypnuti_long_push_nahoru
+id: spankovy_rezim_vypnuti
+alias: "Spánkový režim: Vypnutí (long push nahoru)"
+description: Dlouhý stisk horního tlačítka v ložnici deaktivuje spánkový režim
+triggers:
+  - trigger: state
+    entity_id: event.shelly_loznice_vstup_0
+    attribute: event_type
+    to: long_push
+conditions: []
+actions:
+  - action: cover.open_cover
+    target:
+      entity_id:
+        - cover.roleta_obyvak
+        - cover.roleta_loznice
+  - action: switch.turn_off
+    metadata: {}
+    target:
+      entity_id: switch.sleep_mode
+    data: {}
+mode: single
+category: 01KPK4BZ3Y20C0BAYQ1YGQ1K3M

@@ -1,0 +1,971 @@
+blueprint:
+  name: Ranní probuzení – simulace úsvitu
+  author: kautskyjakub
+  source_url: https://github.com/kautskyjakub/tado-ha/blob/main/blueprints/automation/kautskyjakub/usvit_simulace.yaml
+  homeassistant:
+    min_version: "2025.4.0"
+  domain: automation
+  description: >
+    Simulace úsvitu podle budíku (např. z Garmin hodinek). Světla se rozsvěcují
+    postupně od nočních lamp přes strop u okna až po strop v hloubce místnosti,
+    jas roste logaritmicky, teplota barvy lineárně v miredech (teplá → studená).
+    Během sekvence je vypnuté Adaptive Lighting, na konci se mu kontrola předá
+    s plynulým přechodem. Sekvenci lze přerušit tlačítkem nebo ručním zásahem.
+
+
+    **Výchozí průběh (R = 35 min, T = budík):** T−35 lampy 1 % → T−25 strop u okna
+    (1 žárovka) → T−18 celá skupina u okna + 1 žárovka v hloubce → T−10 celá
+    hloubka → T0 ~250–300 lx na polštáři → T+15 plný jas a 5500 K → T+20 předání AL.
+
+
+    Zrychlený test: vystřel událost (výchozí `usvit_simulace_test`) s daty
+    `duration_min` (výchozí 3) – projde celý průběh bez podmínek spuštění.
+  input:
+    svetla:
+      name: Světla
+      icon: mdi:lightbulb-group
+      input:
+        lamps:
+          name: Noční lampy (fáze 0)
+          description: Nejslabší světla nízko u postele. Lze vybrat jen jednu (strana postele) nebo žádnou.
+          default: []
+          selector:
+            entity:
+              domain: light
+              multiple: true
+        window_group:
+          name: Strop u okna – skupina
+          description: Skupina světel (light group). Žárovky se z ní rozbalí přes atribut entity_id a ovládají se jednotlivě.
+          selector:
+            entity:
+              domain: light
+        window_first:
+          name: Strop u okna – úvodní žárovka
+          description: Jedna žárovka ze skupiny, která se rozsvítí jako první (aby šlo začít co nejníž).
+          selector:
+            entity:
+              domain: light
+        depth_group:
+          name: Strop v hloubce místnosti – skupina
+          selector:
+            entity:
+              domain: light
+        depth_first:
+          name: Strop v hloubce – úvodní žárovka
+          selector:
+            entity:
+              domain: light
+    casovani:
+      name: Budík a časování
+      icon: mdi:alarm
+      input:
+        alarm_sensor:
+          name: Senzor budíku
+          description: Časové razítko příštího budíku (device_class timestamp).
+          selector:
+            entity:
+              domain: sensor
+              device_class: timestamp
+        ramp_minutes:
+          name: Délka rampy před budíkem (R)
+          description: Časy fází se škálují proporčně (výchozí tabulka platí pro 35 min).
+          default: 35
+          selector:
+            number:
+              min: 20
+              max: 60
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+        ramp_entity:
+          name: Délka rampy z helperu (volitelné)
+          description: Pokud je vyplněno, hodnota input_number přepíše „Délku rampy“ – dá se pak měnit z dashboardu.
+          default: ""
+          selector:
+            entity:
+              domain: input_number
+        after_minutes:
+          name: Doba po budíku
+          description: Jak dlouho po budíku pokračovat (náběh na plný studený jas + držení). 0 = předání AL přímo v T0.
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 45
+              step: 1
+              unit_of_measurement: min
+              mode: slider
+        step_seconds:
+          name: Krok smyčky
+          description: Interval mezi příkazy; zároveň délka přechodu (transition) každého kroku.
+          default: 30
+          selector:
+            number:
+              min: 10
+              max: 120
+              step: 5
+              unit_of_measurement: s
+        reschedule_minutes:
+          name: Tolerance posunu budíku
+          description: Když synchronizace posune budík později o víc než tolik minut, sekvence skončí a spustí se znovu podle nového času.
+          default: 10
+          selector:
+            number:
+              min: 2
+              max: 60
+              step: 1
+              unit_of_measurement: min
+        test_event:
+          name: Událost pro zrychlený test
+          default: usvit_simulace_test
+          selector:
+            text:
+        test_step_seconds:
+          name: Krok smyčky v testu
+          default: 5
+          selector:
+            number:
+              min: 2
+              max: 30
+              step: 1
+              unit_of_measurement: s
+    prubeh:
+      name: Průběh (kalibrace)
+      icon: mdi:chart-bell-curve-cumulative
+      collapsed: true
+      input:
+        min_brightness:
+          name: Startovní jas každého světla
+          default: 1
+          selector:
+            number: { min: 1, max: 10, step: 0.5, unit_of_measurement: "%" }
+        lamp_p0:
+          name: Lampy na konci fáze 0 (Rozbřesk)
+          default: 30
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        lamp_p1:
+          name: Lampy na konci fáze 1 (Svítání)
+          default: 50
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        lamp_p2:
+          name: Lampy na konci fáze 2 (Rozednění)
+          default: 70
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        lamp_t0:
+          name: Lampy v T0
+          default: 100
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        window_p1:
+          name: Strop u okna (úvodní žárovka) na konci fáze 1
+          default: 20
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        window_p2:
+          name: Strop u okna (celá skupina) na konci fáze 2
+          default: 30
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        window_t0:
+          name: Strop u okna v T0
+          default: 85
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        depth_p2:
+          name: Strop v hloubce (úvodní žárovka) na konci fáze 2
+          default: 15
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        depth_t0:
+          name: Strop v hloubce (celá skupina) v T0
+          default: 50
+          selector:
+            number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" }
+        kelvin_start:
+          name: Teplota barvy fáze 0–1
+          default: 2202
+          selector:
+            number: { min: 1800, max: 3500, step: 1, unit_of_measurement: K }
+        kelvin_p2:
+          name: Teplota barvy na konci fáze 2
+          default: 2700
+          selector:
+            number: { min: 2000, max: 4000, step: 50, unit_of_measurement: K }
+        kelvin_t0:
+          name: Teplota barvy v T0
+          default: 4000
+          selector:
+            number: { min: 2700, max: 6500, step: 50, unit_of_measurement: K }
+        kelvin_max:
+          name: Maximální teplota barvy (po budíku)
+          default: 5500
+          selector:
+            number: { min: 4000, max: 6500, step: 50, unit_of_measurement: K }
+        amber_start:
+          name: Jantarový start (xy) ve fázi 0–1
+          description: >
+            Místo teploty barvy pošle xy odstín. Zapínej jen pokud jsi vizuálně ověřil,
+            že žárovky zobrazí teplejší odstín než nejnižší teplotu barvy
+            (IKEA KAJPLATS WS: 2202 K = xy 0,579/0,388).
+          default: false
+          selector:
+            boolean:
+        amber_x:
+          name: Jantar – x
+          default: 0.6
+          selector:
+            number: { min: 0.4, max: 0.7, step: 0.005 }
+        amber_y:
+          name: Jantar – y
+          default: 0.38
+          selector:
+            number: { min: 0.3, max: 0.45, step: 0.005 }
+        separate_commands:
+          name: Posílat jas a barvu zvlášť
+          description: Pro žárovky, u kterých druhý příkaz ruší přechod prvního. Pošle barvu, počká 1 s a pak jas.
+          default: false
+          selector:
+            boolean:
+    podminky:
+      name: Podmínky spuštění
+      icon: mdi:check-decagram
+      input:
+        enabled_switch:
+          name: Hlavní vypínač
+          selector:
+            entity:
+              domain: input_boolean
+        weekend_switch:
+          name: Vypínač „i o víkendu“ (volitelné)
+          description: Když je vypnutý, v sobotu a v neděli se úsvit nespustí.
+          default: ""
+          selector:
+            entity:
+              domain: input_boolean
+        person:
+          name: Osoba, která musí být doma
+          selector:
+            entity:
+              domain: person
+        lux_sensor:
+          name: Senzor osvětlení v místnosti (volitelné)
+          description: Když je v místnosti víc než práh, úsvit se nespustí. Při nedostupnosti se použije podmínka slunce/rolety.
+          default: ""
+          selector:
+            entity:
+              domain: sensor
+              device_class: illuminance
+        lux_threshold:
+          name: Práh osvětlení
+          default: 50
+          selector:
+            number: { min: 1, max: 1000, step: 1, unit_of_measurement: lx }
+        sun_elevation:
+          name: Záložní podmínka – elevace slunce pod
+          default: 5
+          selector:
+            number: { min: -18, max: 30, step: 0.5, unit_of_measurement: "°" }
+        cover:
+          name: Záložní podmínka – roleta (volitelné)
+          description: Zatažená roleta (closed nebo pozice ≤ 5 %) povolí úsvit i při vyšší elevaci slunce.
+          default: ""
+          selector:
+            entity:
+              domain: cover
+    al:
+      name: Adaptive Lighting
+      icon: mdi:theme-light-dark
+      input:
+        al_switch:
+          name: Hlavní přepínač Adaptive Lighting
+          selector:
+            entity:
+              domain: switch
+              integration: adaptive_lighting
+        al_extra_switches:
+          name: Další přepínače AL k uložení a obnovení
+          description: Např. adapt_brightness / adapt_color. Spánkový režim sem nedávej – po probuzení se úmyslně neobnovuje.
+          default: []
+          selector:
+            entity:
+              domain: switch
+              multiple: true
+        sleep_mode_switch:
+          name: Přepínač spánkového režimu (vypne se na začátku)
+          default: ""
+          selector:
+            entity:
+              domain: switch
+        handover_seconds:
+          name: Délka předání Adaptive Lighting
+          default: 60
+          selector:
+            number: { min: 0, max: 600, step: 5, unit_of_measurement: s }
+    preruseni:
+      name: Přerušení
+      icon: mdi:hand-back-left
+      input:
+        interrupt_button:
+          name: Tlačítko pro přerušení (event entita)
+          default: ""
+          selector:
+            entity:
+              domain: event
+        interrupt_event_type:
+          name: Typ události tlačítka
+          default: long_push
+          selector:
+            text:
+        interrupt_entities:
+          name: Vstupy vypínačů (ruční zásah)
+          description: Jakákoli změna stavu těchto entit (např. vstupy Shelly nástěnných vypínačů) sekvenci ukončí.
+          default: []
+          selector:
+            entity:
+              multiple: true
+        manual_detection:
+          name: Hlídat ruční změnu světel
+          description: Vypnutí, zapnutí nebo výrazná změna jasu/barvy světla, kterou neudělala sekvence, ji ukončí.
+          default: true
+          selector:
+            boolean:
+        interrupt_behavior:
+          name: Chování po přerušení
+          default: keep
+          selector:
+            select:
+              mode: list
+              options:
+                - label: Ponechat světla a předat Adaptive Lighting
+                  value: keep
+                - label: Vypnout světla
+                  value: "off"
+                - label: Skočit na plný jas a maximální teplotu (AL převezme po autoresetu)
+                  value: full
+    stav:
+      name: Stavové helpery
+      icon: mdi:database-cog
+      input:
+        running_flag:
+          name: Příznak „úsvit běží“
+          description: input_boolean, který sekvence zapíná na začátku a vždy shodí na konci. Jeho ruční vypnutí sekvenci ukončí.
+          selector:
+            entity:
+              domain: input_boolean
+        state_store:
+          name: Úložiště stavu Adaptive Lighting
+          description: input_text pro obnovení AL po restartu nebo chybě uprostřed sekvence.
+          selector:
+            entity:
+              domain: input_text
+    lux:
+      name: Korekce podle senzoru (volitelné)
+      icon: mdi:brightness-auto
+      collapsed: true
+      input:
+        lux_correction:
+          name: Dorovnávat jas podle senzoru
+          description: Od fáze 3 do T0 upravuje jas tak, aby přepočtená hodnota na polštáři odpovídala cíli. Max ±5 % za krok.
+          default: false
+          selector:
+            boolean:
+        lux_ratio_entity:
+          name: Poměr polštář / senzor
+          default: ""
+          selector:
+            entity:
+              domain: input_number
+        lux_target_t0:
+          name: Cíl na polštáři v T0
+          default: 275
+          selector:
+            number: { min: 50, max: 1000, step: 5, unit_of_measurement: lx }
+
+mode: single
+max_exceeded: silent
+
+trace:
+  stored_traces: 10
+
+trigger_variables:
+  t_alarm_sensor: !input alarm_sensor
+  t_ramp_default: !input ramp_minutes
+  t_ramp_entity: !input ramp_entity
+
+triggers:
+  # Budík: now() >= T − R a zároveň budík ještě nenastal (budík v minulosti / unknown se ignoruje).
+  - trigger: template
+    id: alarm
+    value_template: >
+      {% set t = as_datetime(states(t_alarm_sensor), none) %}
+      {% set r = (states(t_ramp_entity) | float(t_ramp_default)) if t_ramp_entity else t_ramp_default | float %}
+      {{ t is not none and (t - timedelta(minutes=r)) <= now() < t }}
+  # Zrychlený test (skript „Otestovat úsvit“).
+  - trigger: event
+    id: test
+    event_type: !input test_event
+  # Záchrana: restart HA uprostřed sekvence.
+  - trigger: homeassistant
+    event: start
+    id: recovery
+  # Záchrana: příznak visí zapnutý déle, než může sekvence běžet (chyba / přerušený běh).
+  - trigger: state
+    entity_id: !input running_flag
+    to: "on"
+    for:
+      hours: 2
+    id: recovery
+
+variables:
+  # --- vstupy ---
+  lamps: !input lamps
+  window_group: !input window_group
+  window_first: !input window_first
+  depth_group: !input depth_group
+  depth_first: !input depth_first
+  alarm_sensor: !input alarm_sensor
+  ramp_input: !input ramp_minutes
+  ramp_entity: !input ramp_entity
+  after_min: !input after_minutes
+  step_input: !input step_seconds
+  test_step: !input test_step_seconds
+  reschedule_min: !input reschedule_minutes
+  min_b: !input min_brightness
+  lamp_p0: !input lamp_p0
+  lamp_p1: !input lamp_p1
+  lamp_p2: !input lamp_p2
+  lamp_t0: !input lamp_t0
+  window_p1: !input window_p1
+  window_p2: !input window_p2
+  window_t0: !input window_t0
+  depth_p2: !input depth_p2
+  depth_t0: !input depth_t0
+  k_start: !input kelvin_start
+  k_p2: !input kelvin_p2
+  k_t0: !input kelvin_t0
+  k_max: !input kelvin_max
+  amber: !input amber_start
+  amber_x: !input amber_x
+  amber_y: !input amber_y
+  separate: !input separate_commands
+  enabled_switch: !input enabled_switch
+  weekend_switch: !input weekend_switch
+  person: !input person
+  lux_sensor: !input lux_sensor
+  lux_threshold: !input lux_threshold
+  sun_elev: !input sun_elevation
+  cover: !input cover
+  al_switch: !input al_switch
+  al_extra: !input al_extra_switches
+  sleep_switch: !input sleep_mode_switch
+  handover_s: !input handover_seconds
+  interrupt_button: !input interrupt_button
+  interrupt_type: !input interrupt_event_type
+  manual_detection: !input manual_detection
+  interrupt_behavior: !input interrupt_behavior
+  running_flag: !input running_flag
+  state_store: !input state_store
+  lux_correction: !input lux_correction
+  lux_ratio_entity: !input lux_ratio_entity
+  lux_target: !input lux_target_t0
+
+  # --- odvozené hodnoty ---
+  is_test: "{{ trigger.id == 'test' }}"
+  ramp: >
+    {{ (states(ramp_entity) | float(ramp_input)) if ramp_entity else ramp_input | float }}
+  # Žárovky ze skupin (rozbalené přes atribut entity_id); úvodní žárovka je vždy první.
+  window_rest: >
+    {{ (state_attr(window_group, 'entity_id') or []) | reject('eq', window_first) | list }}
+  depth_rest: >
+    {{ (state_attr(depth_group, 'entity_id') or []) | reject('eq', depth_first) | list }}
+  all_lights: >
+    {{ (lamps + [window_first] + window_rest + [depth_first] + depth_rest) | unique | list }}
+  # Pro Adaptive Lighting i skupiny (AL má v konfiguraci skupiny, sám si je rozbalí).
+  al_lights: "{{ (all_lights + [window_group, depth_group]) | unique | list }}"
+  al_all_switches: "{{ [al_switch] + al_extra }}"
+  # Měřítko času: 1 = reálný čas; v testu se celý průběh stlačí do duration_min.
+  total_min: "{{ ramp + after_min }}"
+  scale: >
+    {% if is_test %}
+      {% set d = (trigger.event.data.duration_min | default(3)) | float(3) %}
+      {{ [d * 60, 30] | max / (total_min * 60) }}
+    {% else %}1{% endif %}
+  step: "{{ test_step if is_test else step_input }}"
+  alarm_ts: >
+    {% if is_test %}{{ now().timestamp() + ramp * 60 * scale }}
+    {% else %}{{ as_timestamp(states(alarm_sensor), 0) }}{% endif %}
+  # Klíčové body v minutách vůči budíku (tabulka pro 35 min, škáluje se podle R).
+  f: "{{ ramp / 35 }}"
+  pts_t: "{{ [-ramp, -25 * f, -18 * f, -10 * f, 0, after_min * 0.75, after_min] }}"
+  # Stav běhu (mění se uvnitř smyček).
+  stop_reason: ""
+  stop_detail: ""
+  tick_done: false
+  lit: []
+  last_cmd: {}
+  warned: []
+  k_corr: 1
+
+conditions:
+  - or:
+      - condition: trigger
+        id:
+          - test
+          - recovery
+      - and:
+          - condition: state
+            entity_id: !input enabled_switch
+            state: "on"
+          - condition: state
+            entity_id: !input person
+            state: home
+          - condition: state
+            entity_id: !input running_flag
+            state: "off"
+          # Víkend jen se zapnutým „i o víkendu“.
+          - "{{ not weekend_switch or is_state(weekend_switch, 'on') or now().isoweekday() < 6 }}"
+          # Nikdo není vzhůru – žádné ze světel nesvítí.
+          - "{{ all_lights | select('is_state', 'on') | list | length == 0 }}"
+          # V místnosti je ještě tma: senzor osvětlení, jinak slunce nebo zatažená roleta.
+          - >
+            {% set lx = states(lux_sensor) if lux_sensor else 'unavailable' %}
+            {% if is_number(lx) %}
+              {{ lx | float < lux_threshold }}
+            {% else %}
+              {{ state_attr('sun.sun', 'elevation') | float(90) < sun_elev
+                 or (cover != '' and (is_state(cover, 'closed')
+                     or state_attr(cover, 'current_position') | int(100) <= 5)) }}
+            {% endif %}
+
+actions:
+  # ==================================================================
+  # ZÁCHRANA – obnova Adaptive Lighting po restartu / chybě uprostřed běhu
+  # ==================================================================
+  - if:
+      - condition: trigger
+        id: recovery
+    then:
+      - condition: state
+        entity_id: !input running_flag
+        state: "on"
+      - variables:
+          saved: "{{ states(state_store).split(',') }}"
+      - repeat:
+          for_each: "{{ al_all_switches }}"
+          sequence:
+            - variables:
+                idx: "{{ repeat.index - 1 }}"
+            - if:
+                - "{{ saved | length > idx and saved[idx] in ['0', '1'] }}"
+              then:
+                - action: "switch.turn_{{ 'on' if saved[idx] == '1' else 'off' }}"
+                  target:
+                    entity_id: "{{ repeat.item }}"
+                  continue_on_error: true
+      - action: adaptive_lighting.set_manual_control
+        data:
+          entity_id: "{{ al_switch }}"
+          lights: "{{ al_lights }}"
+          manual_control: false
+        continue_on_error: true
+      - action: input_text.set_value
+        target:
+          entity_id: !input state_store
+        data:
+          value: ""
+      - action: input_boolean.turn_off
+        target:
+          entity_id: !input running_flag
+      - action: logbook.log
+        data:
+          name: Simulace úsvitu
+          message: "Záchrana: sekvence neskončila řádně, Adaptive Lighting obnoveno ({{ states(state_store) or 'bez uloženého stavu' }})."
+          entity_id: "{{ this.entity_id }}"
+      - stop: Obnoveno po přerušeném běhu
+
+  # ==================================================================
+  # START – uložit a vypnout Adaptive Lighting, vypnout spánkový režim
+  # ==================================================================
+  - action: input_text.set_value
+    target:
+      entity_id: !input state_store
+    data:
+      value: "{{ al_all_switches | map('states') | map('replace', 'on', '1') | map('replace', 'off', '0') | join(',') }}"
+  - variables:
+      al_was_on: "{{ is_state(al_switch, 'on') }}"
+      lit: "{{ all_lights | select('is_state', 'on') | list }}"
+  - action: input_boolean.turn_on
+    target:
+      entity_id: !input running_flag
+  # Pojistka proti take_over_control – AL světla nesmí převzít ani po zapnutí.
+  - action: adaptive_lighting.set_manual_control
+    data:
+      entity_id: "{{ al_switch }}"
+      lights: "{{ al_lights }}"
+      manual_control: true
+    continue_on_error: true
+  - action: switch.turn_off
+    target:
+      entity_id: "{{ al_switch }}"
+  # Spánkový režim musí být během úsvitu vypnutý (na tom stojí logika dlouhého stisku).
+  - if:
+      - "{{ sleep_switch != '' }}"
+    then:
+      - action: switch.turn_off
+        target:
+          entity_id: "{{ sleep_switch }}"
+        continue_on_error: true
+  - action: logbook.log
+    data:
+      name: Simulace úsvitu
+      message: >
+        {{ 'TEST (' ~ (total_min * scale) | round(1) ~ ' min)' if is_test else 'Start' }}:
+        budík {{ alarm_ts | timestamp_custom('%H:%M') }}, rampa {{ ramp | int }} min,
+        po budíku {{ after_min | int }} min, krok {{ step }} s, světla {{ all_lights | length }}.
+      entity_id: "{{ this.entity_id }}"
+
+  # ==================================================================
+  # HLAVNÍ SMYČKA – jeden krok = výpočet cílů, kontrola ručního zásahu, příkazy, čekání
+  # ==================================================================
+  - repeat:
+      sequence:
+        - variables:
+            tick_start: "{{ now().timestamp() }}"
+            u: "{{ (now().timestamp() - alarm_ts) / (60 * scale) }}"
+        # --- ruční zásah do světel (stav neodpovídá tomu, co sekvence poslala) ---
+        - if:
+            - "{{ manual_detection }}"
+          then:
+            - variables:
+                manual: >
+                  {% set ns = namespace(r=[]) %}
+                  {% for e in all_lights %}
+                    {% set s = states(e) %}
+                    {% if e in lit %}
+                      {% if s == 'off' %}
+                        {% set ns.r = ns.r + [e ~ ' vypnuto'] %}
+                      {% elif s == 'on' and e in last_cmd %}
+                        {% set c = last_cmd[e] %}
+                        {% set b = state_attr(e, 'brightness') | int(-1) %}
+                        {% if b >= 0 and (b - c[0]) | abs > 12 + 0.5 * c[0] %}
+                          {% set ns.r = ns.r + [e ~ ' jas ' ~ b ~ '≠' ~ c[0]] %}
+                        {% endif %}
+                        {% set k = state_attr(e, 'color_temp_kelvin') | int(0) %}
+                        {% if c[1] > 0 and k > 0 and (1000000 / k - 1000000 / c[1]) | abs > 80 %}
+                          {% set ns.r = ns.r + [e ~ ' barva ' ~ k ~ 'K≠' ~ c[1] ~ 'K'] %}
+                        {% endif %}
+                      {% endif %}
+                    {% elif s == 'on' and e not in warned %}
+                      {# světlo, které bylo nedostupné, se po připojení může samo rozsvítit – to není zásah #}
+                      {% set ns.r = ns.r + [e ~ ' zapnuto zvenku'] %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ ns.r | join(', ') }}
+            - if:
+                - "{{ manual != '' }}"
+              then:
+                - variables:
+                    stop_reason: manual
+                    stop_detail: "{{ manual }}"
+        - if:
+            - "{{ stop_reason == '' }}"
+          then:
+            # --- korekce podle senzoru (fáze 3 až T0; po T0 se vrací k 1) ---
+            - if:
+                - "{{ lux_correction and lux_sensor != '' and lux_ratio_entity != '' }}"
+              then:
+                - variables:
+                    k_corr: >
+                      {% set lx = states(lux_sensor) %}
+                      {% set ratio = states(lux_ratio_entity) | float(0) %}
+                      {% set k = k_corr | float(1) %}
+                      {% if u >= pts_t[3] and u <= 0 and is_number(lx) and ratio > 0 %}
+                        {% set pillow = lx | float * ratio %}
+                        {% set frac = (u - pts_t[3]) / (0 - pts_t[3]) %}
+                        {% set goal = lux_target * (0.1 ** (1 - frac)) %}
+                        {% if pillow < goal * 0.9 %}{% set k = [k + 0.05, 2.0] | min %}
+                        {% elif pillow > goal * 1.1 %}{% set k = [k - 0.05, 0.3] | max %}{% endif %}
+                      {% elif u > 0 %}
+                        {% set k = ([k + 0.05, 1] | min) if k < 1 else ([k - 0.05, 1] | max) %}
+                      {% endif %}
+                      {{ k | round(3) }}
+            # --- cílové hodnoty pro každé světlo ---
+            - variables:
+                plan: >
+                  {% macro lg(pts, x) -%}
+                    {%- if x < pts[0][0] -%}-1
+                    {%- elif x >= pts[-1][0] -%}{{ pts[-1][1] }}
+                    {%- else -%}
+                      {%- for i in range(pts | length - 1) -%}
+                        {%- set a = pts[i] -%}{%- set b = pts[i + 1] -%}
+                        {%- if a[0] <= x < b[0] -%}
+                          {{ a[1] * (b[1] / a[1]) ** ((x - a[0]) / (b[0] - a[0])) }}
+                        {%- endif -%}
+                      {%- endfor -%}
+                    {%- endif -%}
+                  {%- endmacro %}
+                  {% macro lin(pts, x) -%}
+                    {%- if x < pts[0][0] -%}{{ pts[0][1] }}
+                    {%- elif x >= pts[-1][0] -%}{{ pts[-1][1] }}
+                    {%- else -%}
+                      {%- for i in range(pts | length - 1) -%}
+                        {%- set a = pts[i] -%}{%- set b = pts[i + 1] -%}
+                        {%- if a[0] <= x < b[0] -%}
+                          {{ a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]) }}
+                        {%- endif -%}
+                      {%- endfor -%}
+                    {%- endif -%}
+                  {%- endmacro %}
+                  {% set p = pts_t %}
+                  {% set m = min_b | float %}
+                  {% set ch = {
+                    'lamp': [[p[0], m], [p[1], lamp_p0], [p[2], lamp_p1], [p[3], lamp_p2], [p[4], lamp_t0], [p[5], 100]],
+                    'w1': [[p[1], m], [p[2], window_p1], [p[3], window_p2], [p[4], window_t0], [p[5], 100]],
+                    'w2': [[p[2], m], [p[3], window_p2], [p[4], window_t0], [p[5], 100]],
+                    'd1': [[p[2], m], [p[3], depth_p2], [p[4], depth_t0], [p[5], 100]],
+                    'd2': [[p[3], m], [p[4], depth_t0], [p[5], 100]]
+                  } %}
+                  {% set roles = namespace(l=[]) %}
+                  {% for e in lamps %}{% set roles.l = roles.l + [[e, 'lamp']] %}{% endfor %}
+                  {% set roles.l = roles.l + [[window_first, 'w1']] %}
+                  {% for e in window_rest %}{% set roles.l = roles.l + [[e, 'w2']] %}{% endfor %}
+                  {% set roles.l = roles.l + [[depth_first, 'd1']] %}
+                  {% for e in depth_rest %}{% set roles.l = roles.l + [[e, 'd2']] %}{% endfor %}
+                  {% set mired = lin([[p[0], 1000000 / k_start], [p[2], 1000000 / k_start], [p[3], 1000000 / k_p2],
+                                      [p[4], 1000000 / k_t0], [p[5], 1000000 / k_max]], u) | float %}
+                  {% set kelvin = (1000000 / mired) | round(0) | int %}
+                  {% set use_xy = amber and u < p[2] %}
+                  {% set out = namespace(l=[], seen=[]) %}
+                  {% for r in roles.l %}
+                    {% set pct = lg(ch[r[1]], u) | float %}
+                    {% if pct >= 0 and r[0] not in out.seen %}
+                      {% set out.seen = out.seen + [r[0]] %}
+                      {% set pct = [[pct * k_corr | float(1), m] | max, 100] | min %}
+                      {% set bri = [[(pct * 2.55) | round(0) | int, 1] | max, 255] | min %}
+                      {% set out.l = out.l + [{'e': r[0], 'b': bri, 'k': 0 if use_xy else kelvin}] %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ {'cmds': out.l, 'kelvin': kelvin, 'xy': use_xy} }}
+            # --- nedostupná světla přeskočit a jednou zalogovat ---
+            - variables:
+                unavailable_now: >
+                  {{ plan.cmds | map(attribute='e') | select('is_state', ['unavailable', 'unknown']) | list }}
+                avail_cmds: "{{ plan.cmds | rejectattr('e', 'in', unavailable_now) | list }}"
+                newly_unavailable: "{{ unavailable_now | reject('in', warned) | list }}"
+            - if:
+                - "{{ newly_unavailable | length > 0 }}"
+              then:
+                - action: logbook.log
+                  data:
+                    name: Simulace úsvitu
+                    message: "Varování: nedostupná světla přeskočena: {{ newly_unavailable | join(', ') }}"
+                    entity_id: "{{ this.entity_id }}"
+                - variables:
+                    warned: "{{ warned + newly_unavailable }}"
+            # --- příkazy jednotlivým žárovkám ---
+            - repeat:
+                for_each: "{{ avail_cmds }}"
+                sequence:
+                  - if:
+                      - "{{ separate and repeat.item.k > 0 and is_state(repeat.item.e, 'on') }}"
+                    then:
+                      # IKEA režim: nejdřív barva, po 1 s jas (jen když už svítí; ze stavu vypnuto jde vše najednou).
+                      - action: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item.e }}"
+                        data:
+                          color_temp_kelvin: "{{ repeat.item.k }}"
+                          transition: "{{ step }}"
+                        continue_on_error: true
+                      - delay:
+                          seconds: 1
+                      - action: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item.e }}"
+                        data:
+                          brightness: "{{ repeat.item.b }}"
+                          transition: "{{ step }}"
+                        continue_on_error: true
+                    else:
+                      - action: light.turn_on
+                        target:
+                          entity_id: "{{ repeat.item.e }}"
+                        data: >
+                          {% set d = {'brightness': repeat.item.b, 'transition': step} %}
+                          {% if repeat.item.k > 0 %}{{ dict(d, color_temp_kelvin=repeat.item.k) }}
+                          {% else %}{{ dict(d, xy_color=[amber_x, amber_y]) }}{% endif %}
+                        continue_on_error: true
+            - variables:
+                lit: "{{ (lit + avail_cmds | map(attribute='e') | list) | unique | list }}"
+                last_cmd: >
+                  {% set ns = namespace(d=last_cmd) %}
+                  {% for c in avail_cmds %}{% set ns.d = dict(ns.d, **{c.e: [c.b, c.k]}) %}{% endfor %}
+                  {{ ns.d }}
+            # --- čekání do dalšího kroku s hlídáním přerušení ---
+            - variables:
+                tick_done: false
+            - repeat:
+                sequence:
+                  - wait_for_trigger:
+                      - trigger: event
+                        event_type: state_changed
+                        event_data:
+                          entity_id: !input interrupt_button
+                        id: button
+                      - trigger: state
+                        entity_id: !input interrupt_entities
+                        not_from:
+                          - unavailable
+                          - unknown
+                        not_to:
+                          - unavailable
+                          - unknown
+                        id: input
+                      - trigger: state
+                        entity_id: !input running_flag
+                        to: "off"
+                        id: flag
+                      - trigger: state
+                        entity_id: !input enabled_switch
+                        to: "off"
+                        id: disabled
+                      - trigger: state
+                        entity_id: !input alarm_sensor
+                        id: alarm_changed
+                    timeout:
+                      seconds: "{{ [tick_start + step - now().timestamp(), 0.5] | max }}"
+                    continue_on_timeout: true
+                  - variables:
+                      w_id: "{{ wait.trigger.id if wait.trigger else 'timeout' }}"
+                      new_alarm: >
+                        {{ as_timestamp(wait.trigger.to_state.state, 0) if w_id == 'alarm_changed' and wait.trigger.to_state else 0 }}
+                  - variables:
+                      stop_reason: >
+                        {% if w_id == 'button' %}
+                          {% set ns_ = wait.trigger.event.data.new_state %}
+                          {% set os_ = wait.trigger.event.data.old_state %}
+                          {{ 'button' if ns_ and os_ and os_.state not in ['unavailable', 'unknown']
+                             and ns_.attributes.event_type == interrupt_type
+                             and not (sleep_switch != '' and is_state(sleep_switch, 'on')) else '' }}
+                        {% elif w_id in ['input', 'flag', 'disabled'] %}{{ w_id }}
+                        {% elif w_id == 'alarm_changed' and not is_test and new_alarm > alarm_ts + reschedule_min * 60
+                           and new_alarm - ramp * 60 > now().timestamp() %}reschedule
+                        {% else %}{% endif %}
+                      stop_detail: >
+                        {% if w_id == 'input' %}{{ wait.trigger.entity_id }}
+                        {% elif w_id == 'alarm_changed' %}nový budík {{ new_alarm | timestamp_custom('%H:%M') }}
+                        {% else %}{{ stop_detail }}{% endif %}
+                      # Budík posunutý o víc než toleranci, ale nový start už proběhl → jen posunout časovou osu.
+                      alarm_ts: >
+                        {% if w_id == 'alarm_changed' and not is_test and new_alarm > alarm_ts + reschedule_min * 60
+                           and new_alarm - ramp * 60 <= now().timestamp() %}{{ new_alarm }}{% else %}{{ alarm_ts }}{% endif %}
+                      tick_done: "{{ w_id == 'timeout' or stop_reason != '' }}"
+                until:
+                  - "{{ tick_done }}"
+      until:
+        - "{{ stop_reason != '' or (now().timestamp() - alarm_ts) / (60 * scale) >= after_min }}"
+
+  # ==================================================================
+  # KONEC – podle důvodu: předání AL / vypnutí / plný jas / přeplánování
+  # ==================================================================
+  - variables:
+      end_action: >
+        {% if stop_reason == '' %}handover
+        {% elif stop_reason == 'reschedule' %}off
+        {% elif interrupt_behavior == 'off' %}off
+        {% elif interrupt_behavior == 'full' %}full
+        {% else %}handover{% endif %}
+      live_lights: "{{ all_lights | select('is_state', 'on') | list }}"
+  - action: logbook.log
+    data:
+      name: Simulace úsvitu
+      message: >
+        {{ 'Dokončeno' if stop_reason == '' else 'Ukončeno (' ~ stop_reason ~ ((': ' ~ stop_detail) if stop_detail else '') ~ ')' }}
+        → {{ {'handover': 'předání Adaptive Lighting', 'off': 'vypnutí světel', 'full': 'plný jas'}[end_action] }}.
+      entity_id: "{{ this.entity_id }}"
+  - choose:
+      - conditions:
+          - "{{ end_action == 'off' }}"
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id: "{{ all_lights }}"
+            data:
+              transition: 3
+            continue_on_error: true
+      - conditions:
+          - "{{ end_action == 'full' and live_lights | length > 0 }}"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: "{{ live_lights }}"
+            data:
+              brightness: 255
+              color_temp_kelvin: "{{ k_max }}"
+              transition: 3
+            continue_on_error: true
+      - conditions:
+          - "{{ end_action == 'handover' and al_was_on and live_lights | length > 0 and handover_s | int > 0 }}"
+        sequence:
+          # AL je stále vypnuté; apply funguje i tak a udělá plynulý přechod na aktuální hodnoty AL.
+          - action: adaptive_lighting.apply
+            data:
+              entity_id: "{{ al_switch }}"
+              lights: "{{ live_lights }}"
+              transition: "{{ handover_s }}"
+              adapt_brightness: true
+              adapt_color: true
+            continue_on_error: true
+          - delay:
+              seconds: "{{ handover_s | int + 2 }}"
+  # Obnova přepínačů AL (zapnutí AL zruší manual_control a světla doladí – už jsou na cílových hodnotách).
+  - variables:
+      saved: "{{ states(state_store).split(',') }}"
+  - repeat:
+      for_each: "{{ al_all_switches }}"
+      sequence:
+        - variables:
+            idx: "{{ repeat.index - 1 }}"
+        - if:
+            - "{{ saved | length > idx and saved[idx] in ['0', '1'] }}"
+          then:
+            - action: "switch.turn_{{ 'on' if saved[idx] == '1' else 'off' }}"
+              target:
+                entity_id: "{{ repeat.item }}"
+              continue_on_error: true
+  - if:
+      - "{{ end_action == 'full' and live_lights | length > 0 }}"
+    then:
+      # Plný jas nechat – AL je převezme až po svém autoresetu ruční kontroly.
+      - action: adaptive_lighting.set_manual_control
+        data:
+          entity_id: "{{ al_switch }}"
+          lights: "{{ al_lights }}"
+          manual_control: true
+        continue_on_error: true
+      - action: light.turn_on
+        target:
+          entity_id: "{{ live_lights }}"
+        data:
+          brightness: 255
+          color_temp_kelvin: "{{ k_max }}"
+          transition: 1
+        continue_on_error: true
+    else:
+      - action: adaptive_lighting.set_manual_control
+        data:
+          entity_id: "{{ al_switch }}"
+          lights: "{{ al_lights }}"
+          manual_control: false
+        continue_on_error: true
+  - action: input_text.set_value
+    target:
+      entity_id: !input state_store
+    data:
+      value: ""
+  - action: input_boolean.turn_off
+    target:
+      entity_id: !input running_flag
