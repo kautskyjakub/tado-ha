@@ -851,16 +851,19 @@ actions:
                              and ns_.attributes.event_type == interrupt_type
                              and not (sleep_switch != '' and is_state(sleep_switch, 'on')) else '' }}
                         {% elif w_id in ['input', 'flag', 'disabled'] %}{{ w_id }}
-                        {% elif w_id == 'alarm_changed' and not is_test and new_alarm > alarm_ts + reschedule_min * 60
+                        {% elif w_id == 'alarm_changed' and not is_test and now().timestamp() < alarm_ts
+                           and new_alarm > alarm_ts + reschedule_min * 60
                            and new_alarm - ramp * 60 > now().timestamp() %}reschedule
                         {% else %}{% endif %}
                       stop_detail: >
                         {% if w_id == 'input' %}{{ wait.trigger.entity_id }}
-                        {% elif w_id == 'alarm_changed' %}nový budík {{ new_alarm | timestamp_custom('%H:%M') }}
+                        {% elif stop_reason == 'reschedule' %}nový budík {{ new_alarm | timestamp_custom('%H:%M') }}
                         {% else %}{{ stop_detail }}{% endif %}
                       # Budík posunutý o víc než toleranci, ale nový start už proběhl → jen posunout časovou osu.
+                      # Po T0 se změny senzoru ignorují – senzor po odzvonění přeskočí na další budík.
                       alarm_ts: >
-                        {% if w_id == 'alarm_changed' and not is_test and new_alarm > alarm_ts + reschedule_min * 60
+                        {% if w_id == 'alarm_changed' and not is_test and now().timestamp() < alarm_ts
+                           and new_alarm > alarm_ts + reschedule_min * 60
                            and new_alarm - ramp * 60 <= now().timestamp() %}{{ new_alarm }}{% else %}{{ alarm_ts }}{% endif %}
                       tick_done: "{{ w_id == 'timeout' or stop_reason != '' }}"
                 until:
