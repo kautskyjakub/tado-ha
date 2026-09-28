@@ -548,43 +548,46 @@ actions:
       - condition: trigger
         id: recovery
     then:
-      - condition: state
-        entity_id: !input running_flag
-        state: "on"
-      - variables:
-          saved: "{{ states(state_store).split(',') }}"
-      - repeat:
-          for_each: "{{ al_all_switches }}"
-          sequence:
-            - variables:
-                idx: "{{ repeat.index - 1 }}"
-            - if:
-                - "{{ saved | length > idx and saved[idx] in ['0', '1'] }}"
-              then:
-                - action: "switch.turn_{{ 'on' if saved[idx] == '1' else 'off' }}"
-                  target:
-                    entity_id: "{{ repeat.item }}"
-                  continue_on_error: true
-      - action: adaptive_lighting.set_manual_control
-        data:
-          entity_id: "{{ al_switch }}"
-          lights: "{{ al_lights }}"
-          manual_control: false
-        continue_on_error: true
-      - action: input_text.set_value
-        target:
-          entity_id: !input state_store
-        data:
-          value: ""
-      - action: input_boolean.turn_off
-        target:
-          entity_id: !input running_flag
-      - action: logbook.log
-        data:
-          name: Simulace úsvitu
-          message: "Záchrana: sekvence neskončila řádně, Adaptive Lighting obnoveno ({{ states(state_store) or 'bez uloženého stavu' }})."
-          entity_id: "{{ this.entity_id }}"
-      - stop: Obnoveno po přerušeném běhu
+      # Záchranný trigger NESMÍ propadnout do startu sekvence (stop platí vždy, i když příznak není zapnutý).
+      - if:
+          - condition: state
+            entity_id: !input running_flag
+            state: "on"
+        then:
+          - variables:
+              saved: "{{ states(state_store).split(',') }}"
+          - repeat:
+              for_each: "{{ al_all_switches }}"
+              sequence:
+                - variables:
+                    idx: "{{ repeat.index - 1 }}"
+                - if:
+                    - "{{ saved | length > idx and saved[idx] in ['0', '1'] }}"
+                  then:
+                    - action: "switch.turn_{{ 'on' if saved[idx] == '1' else 'off' }}"
+                      target:
+                        entity_id: "{{ repeat.item }}"
+                      continue_on_error: true
+          - action: adaptive_lighting.set_manual_control
+            data:
+              entity_id: "{{ al_switch }}"
+              lights: "{{ al_lights }}"
+              manual_control: false
+            continue_on_error: true
+          - action: input_text.set_value
+            target:
+              entity_id: !input state_store
+            data:
+              value: ""
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input running_flag
+          - action: logbook.log
+            data:
+              name: Simulace úsvitu
+              message: "Záchrana: sekvence neskončila řádně, Adaptive Lighting obnoveno ({{ states(state_store) or 'bez uloženého stavu' }})."
+              entity_id: "{{ this.entity_id }}"
+      - stop: Záchranný běh dokončen
 
   # ==================================================================
   # START – uložit a vypnout Adaptive Lighting, vypnout spánkový režim
