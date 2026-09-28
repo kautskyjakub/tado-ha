@@ -607,7 +607,7 @@ actions:
           - action: logbook.log
             data:
               name: Simulace úsvitu
-              message: "Záchrana: sekvence neskončila řádně, Adaptive Lighting obnoveno ({{ states(state_store) or 'bez uloženého stavu' }})."
+              message: "Záchrana: sekvence neskončila řádně, Adaptive Lighting obnoveno ({{ saved | join(',') or 'bez uloženého stavu' }})."
               entity_id: "{{ this.entity_id }}"
       - stop: Záchranný běh dokončen
 
