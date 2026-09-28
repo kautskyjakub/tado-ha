@@ -250,6 +250,20 @@ blueprint:
           selector:
             entity:
               domain: person
+        skip_if_sunrise:
+          name: Nespouštět, když slunce vyjde před budíkem
+          description: >
+            Když slunce vyjde víc než „Rezervu“ minut před budíkem, simulace nemá smysl
+            (denní světlo ji přebije) a nespustí se.
+          default: true
+          selector:
+            boolean:
+        sunrise_margin:
+          name: Rezerva východu slunce před budíkem
+          description: Úsvit se spustí, jen když slunce vyjde nejdřív tolik minut před budíkem (nebo až po něm).
+          default: 15
+          selector:
+            number: { min: 0, max: 120, step: 5, unit_of_measurement: min }
         lux_sensor:
           name: Senzor osvětlení v místnosti (volitelné)
           description: Když je v místnosti víc než práh, úsvit se nespustí. Při nedostupnosti se použije podmínka slunce/rolety.
@@ -454,6 +468,8 @@ variables:
   enabled_switch: !input enabled_switch
   weekend_switch: !input weekend_switch
   person: !input person
+  skip_if_sunrise: !input skip_if_sunrise
+  sunrise_margin: !input sunrise_margin
   lux_sensor: !input lux_sensor
   lux_threshold: !input lux_threshold
   sun_elev: !input sun_elevation
@@ -527,6 +543,12 @@ conditions:
             state: "off"
           # Víkend jen se zapnutým „i o víkendu“.
           - "{{ not weekend_switch or is_state(weekend_switch, 'on') or now().isoweekday() < 6 }}"
+          # Slunce nesmí vyjít víc než rezervu před budíkem (jinak úsvit přebije denní světlo).
+          # V okamžiku startu (T − R) je next_rising dnešní východ; pokud už slunce vyšlo, úsvit se nespustí.
+          - >
+            {{ not skip_if_sunrise
+               or (is_state('sun.sun', 'below_horizon')
+                   and as_timestamp(state_attr('sun.sun', 'next_rising'), 0) >= alarm_ts - sunrise_margin * 60) }}
           # Nikdo není vzhůru – žádné ze světel nesvítí.
           - "{{ all_lights | select('is_state', 'on') | list | length == 0 }}"
           # V místnosti je ještě tma: senzor osvětlení, jinak slunce nebo zatažená roleta.

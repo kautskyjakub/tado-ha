@@ -38,6 +38,13 @@ uložení přes API blueprint přeformátuje a komentáře zahodí.
 - Smyčka má krok 30 s a každý příkaz má `transition` 30 s; žárovky se ovládají **jednotlivě**
   (skupiny se jen rozbalí přes atribut `entity_id`).
 
+## Kdy se úsvit nespustí
+
+- `input_boolean.probuzeni_aktivni` je vypnutý, osoba není doma, víkend bez „i o víkendu“, nebo už něco svítí.
+- V místnosti je víc než 50 lx (při nedostupném senzoru: slunce nad 5° a roleta není zatažená).
+- **Slunce vyjde víc než 15 min před budíkem** (vstup *Rezerva východu slunce před budíkem*) – denní
+  světlo by simulaci stejně přebilo. Typicky konec září / začátek října a jaro.
+
 ## Přerušení
 
 - Dlouhý stisk `event.shelly_loznice_vstup_0` (horní tlačítko rolet): při zapnutém spánkovém režimu
