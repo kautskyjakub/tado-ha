@@ -359,6 +359,22 @@ blueprint:
                   value: "off"
                 - label: Skočit na plný jas a maximální teplotu (AL převezme po autoresetu)
                   value: full
+        button_behavior:
+          name: Chování po přerušení tlačítkem
+          description: Zvlášť pro tlačítko (např. dlouhý stisk = zhasnout). „Stejně jako ostatní přerušení“ použije volbu výše.
+          default: same
+          selector:
+            select:
+              mode: list
+              options:
+                - label: Stejně jako ostatní přerušení
+                  value: same
+                - label: Ponechat světla a předat Adaptive Lighting
+                  value: keep
+                - label: Vypnout světla
+                  value: "off"
+                - label: Skočit na plný jas a maximální teplotu (AL převezme po autoresetu)
+                  value: full
     stav:
       name: Stavové helpery
       icon: mdi:database-cog
@@ -482,6 +498,7 @@ variables:
   interrupt_type: !input interrupt_event_type
   manual_detection: !input manual_detection
   interrupt_behavior: !input interrupt_behavior
+  button_behavior: !input button_behavior
   running_flag: !input running_flag
   state_store: !input state_store
   lux_correction: !input lux_correction
@@ -903,6 +920,7 @@ actions:
       end_action: >
         {% if stop_reason == '' %}handover
         {% elif stop_reason == 'reschedule' %}off
+        {% elif stop_reason == 'button' and button_behavior != 'same' %}{{ button_behavior }}
         {% elif interrupt_behavior == 'off' %}off
         {% elif interrupt_behavior == 'full' %}full
         {% else %}handover{% endif %}
@@ -912,7 +930,7 @@ actions:
       name: Simulace úsvitu
       message: >
         {{ 'Dokončeno' if stop_reason == '' else 'Ukončeno (' ~ stop_reason ~ ((': ' ~ stop_detail) if stop_detail else '') ~ ')' }}
-        → {{ {'handover': 'předání Adaptive Lighting', 'off': 'vypnutí světel', 'full': 'plný jas'}[end_action] }}.
+        → {{ {'handover': 'předání Adaptive Lighting', 'keep': 'předání Adaptive Lighting', 'off': 'vypnutí světel', 'full': 'plný jas'}[end_action] }}.
       entity_id: "{{ this.entity_id }}"
   - choose:
       - conditions:
@@ -936,7 +954,7 @@ actions:
               transition: 3
             continue_on_error: true
       - conditions:
-          - "{{ end_action == 'handover' and al_was_on and live_lights | length > 0 and handover_s | int > 0 }}"
+          - "{{ end_action in ['handover', 'keep'] and al_was_on and live_lights | length > 0 and handover_s | int > 0 }}"
         sequence:
           # AL je stále vypnuté; apply funguje i tak a udělá plynulý přechod na aktuální hodnoty AL.
           - action: adaptive_lighting.apply

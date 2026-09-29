@@ -48,8 +48,10 @@ uložení přes API blueprint přeformátuje a komentáře zahodí.
 ## Přerušení
 
 - Dlouhý stisk `event.shelly_loznice_vstup_0` (horní tlačítko rolet): při zapnutém spánkovém režimu
-  ho vypne (původní automatizace), při běžícím úsvitu úsvit ukončí. Úsvit na začátku vypíná
-  `switch.sleep_mode`, takže se oba stavy nepotkají.
+  ho vypne (původní automatizace), při běžícím úsvitu úsvit ukončí a **zhasne lampy i strop**
+  (vstup *Chování po přerušení tlačítkem* = Vypnout světla). Do 2 h po skončení úsvitu dlouhý stisk
+  také zhasne lampy a strop (větev v `automation.spankovy_rezim_vypnuti_long_push_nahoru`).
+  Úsvit na začátku vypíná `switch.sleep_mode`, takže se stavy nepotkají.
 - Změna vstupů nástěnných vypínačů (`binary_sensor.shelly2pmg3_28372f26a0e4_vstup_0/1`).
 - Ruční změna světel (vypnutí, zapnutí zvenku, změna jasu nebo barvy mimo toleranci).
 - Vypnutí `input_boolean.probuzeni_bezi` nebo `input_boolean.probuzeni_aktivni`.
