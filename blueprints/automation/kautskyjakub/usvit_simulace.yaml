@@ -940,8 +940,15 @@ actions:
             target:
               entity_id: "{{ all_lights }}"
             data:
-              transition: 3
+              transition: 1
             continue_on_error: true
+          # AL se smí zapnout až po zhasnutí – při zapnutí přizpůsobí (= znovu rozsvítí) vše, co ještě svítí.
+          - wait_template: "{{ all_lights | select('is_state', 'on') | list | length == 0 }}"
+            timeout:
+              seconds: 15
+            continue_on_timeout: true
+          - delay:
+              seconds: 2
       - conditions:
           - "{{ end_action == 'full' and live_lights | length > 0 }}"
         sequence:
@@ -982,6 +989,21 @@ actions:
               target:
                 entity_id: "{{ repeat.item }}"
               continue_on_error: true
+  - if:
+      - "{{ end_action == 'off' }}"
+    then:
+      # Pojistka: kdyby AL po zapnutí přece jen něco rozsvítilo, znovu zhasnout.
+      - delay:
+          seconds: 3
+      - if:
+          - "{{ all_lights | select('is_state', 'on') | list | length > 0 }}"
+        then:
+          - action: light.turn_off
+            target:
+              entity_id: "{{ all_lights | select('is_state', 'on') | list }}"
+            data:
+              transition: 1
+            continue_on_error: true
   - if:
       - "{{ end_action == 'full' and live_lights | length > 0 }}"
     then:
